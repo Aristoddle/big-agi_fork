@@ -2,7 +2,7 @@ import type { DLLMId } from '~/modules/llms/store-llms';
 import type { StreamingClientUpdate } from '~/modules/llms/vendors/unifiedStreamingClient';
 import { autoSuggestions } from '~/modules/aifn/autosuggestions/autoSuggestions';
 import { conversationAutoTitle } from '~/modules/aifn/autotitle/autoTitle';
-import { llmStreamingChatGenerate, VChatMessageIn } from '~/modules/llms/llm.client';
+import { llmStreamingChatGenerate, VChatContextRef, VChatMessageIn, VChatStreamContextName } from '~/modules/llms/llm.client';
 import { speakText } from '~/modules/elevenlabs/elevenlabs.client';
 
 import { ConversationsManager } from '~/common/chats/ConversationsManager';
@@ -36,7 +36,10 @@ export async function runAssistantUpdatingState(conversationId: string, history:
   };
   const messageStatus = await streamAssistantMessage(
     assistantLlmId,
-    history.map((m): VChatMessageIn => ({ role: m.role, content: messageSingleTextOrThrow(m) })),
+
+    history.map((m): VChatMessageIn => ({ role: m.role, content: m.text })),
+    'conversation',
+    conversationId,
     parallelViewCount,
     autoSpeak,
     onMessageUpdated,
@@ -64,6 +67,8 @@ type StreamMessageStatus = { outcome: StreamMessageOutcome, errorMessage?: strin
 export async function streamAssistantMessage(
   llmId: DLLMId,
   messagesHistory: VChatMessageIn[],
+  contextName: VChatStreamContextName,
+  contextRef: VChatContextRef,
   throttleUnits: number, // 0: disable, 1: default throttle (12Hz), 2+ reduce the message frequency with the square root
   autoSpeak: ChatAutoSpeakType,
   onMessageUpdated: (incrementalMessage: Partial<DMessage>) => void,
@@ -98,7 +103,7 @@ export async function streamAssistantMessage(
   };
 
   try {
-    await llmStreamingChatGenerate(llmId, messagesHistory, null, null, abortSignal, (update: StreamingClientUpdate) => {
+    await llmStreamingChatGenerate(llmId, messagesHistory, contextName, contextRef, null, null, abortSignal, (update: StreamingClientUpdate) => {
       const textSoFar = update.textSoFar;
 
       // grow the incremental message
