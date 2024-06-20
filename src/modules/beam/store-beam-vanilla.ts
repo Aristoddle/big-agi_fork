@@ -2,7 +2,7 @@ import { createStore, StateCreator } from 'zustand/vanilla';
 
 import { DLLMId, getDiverseTopLlmIds } from '~/modules/llms/store-llms';
 
-import type { DMessage } from '~/common/state/store-chats';
+import type { DMessage, DMessageFragment, DMessageFragmentId, DMessageId } from '~/common/stores/chat/chat.message';
 
 import { BeamConfigSnapshot, useModuleBeamStore } from './store-module-beam';
 import { SCATTER_RAY_DEF } from './beam.config';
@@ -26,7 +26,7 @@ export const createBeamVanillaStore = () => createStore<BeamStore>()((...a) => (
 
 /// Common Store Slice ///
 
-type BeamSuccessCallback = (text: string, llmId: DLLMId) => void;
+type BeamSuccessCallback = (fragments: DMessageFragment[], llmId: DLLMId) => void;
 
 interface RootStateSlice {
 
@@ -58,7 +58,7 @@ export interface RootStoreSlice extends RootStateSlice {
   loadBeamConfig: (preset: BeamConfigSnapshot | null) => void;
 
   setIsMaximized: (maximized: boolean) => void;
-  editInputHistoryMessage: (messageId: string, newText: string) => void;
+  inputHistoryReplaceMessageFragment: (messageId: DMessageId, fragmentId: DMessageFragmentId, newFragment: DMessageFragment) => void;
 
 }
 
@@ -137,11 +137,29 @@ const createRootSlice: StateCreator<BeamStore, [], [], RootStoreSlice> = (_set, 
       isMaximized: maximized,
     }),
 
-  editInputHistoryMessage: (messageId: string, newText: string) =>
+  inputHistoryReplaceMessageFragment: (messageId: DMessageId, fragmentId: DMessageFragmentId, newFragment: DMessageFragment) =>
     _set(state => ({
-      inputHistory: state.inputHistory?.map((message) => (message.id !== messageId) ? message : {
-        ...message,
-        text: newText,
+      inputHistory: state.inputHistory?.map((message): DMessage => {
+        if (message.id !== messageId)
+          return message;
+
+        // probably unnecessary development warning
+        if (message.fragments.findIndex(f => f.fId === fragmentId) === -1) {
+          console.error(`inputHistoryReplaceMessageFragment: cannot find missing fragment ID ${fragmentId} for message ${messageId}`);
+          return message;
+        }
+
+        const updatedFragments = message.fragments.map((fragment) =>
+          (fragment.fId === fragmentId)
+            ? newFragment
+            : fragment,
+        );
+
+        return {
+          ...message,
+          fragments: updatedFragments,
+          updated: Date.now(),
+        };
       }),
     })),
 

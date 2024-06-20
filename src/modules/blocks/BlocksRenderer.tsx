@@ -1,21 +1,19 @@
 import * as React from 'react';
-import TimeAgo from 'react-timeago';
 import type { Diff as TextDiff } from '@sanity/diff-match-patch';
 
 import type { SxProps } from '@mui/joy/styles/types';
-import { Box, Button, Tooltip, Typography } from '@mui/joy';
+import { Box, Button, Typography } from '@mui/joy';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 
-import type { DMessage } from '~/common/state/store-chats';
+import type { DMessageRole } from '~/common/stores/chat/chat.message';
 import { ContentScaling, lineHeightChatTextMd, themeScalingMap } from '~/common/app.theme';
-import { InlineError } from '~/common/components/InlineError';
 
+import { RenderChatText } from './RenderChatText';
 import { RenderCode, RenderCodeMemo } from './code/RenderCode';
 import { RenderHtml } from './RenderHtml';
-import { RenderImage } from './RenderImage';
+import { RenderImageURL } from './RenderImageURL';
 import { RenderMarkdown, RenderMarkdownMemo } from './markdown/RenderMarkdown';
-import { RenderChatText } from './RenderChatText';
 import { RenderTextDiff } from './RenderTextDiff';
 import { areBlocksEqual, Block, parseMessageBlocks } from './blocks';
 
@@ -24,21 +22,21 @@ import { areBlocksEqual, Block, parseMessageBlocks } from './blocks';
 const USER_COLLAPSED_LINES: number = 7;
 
 
-const blocksSx: SxProps = {
-  my: 'auto',
+/**
+ * This style is reused by all the Fragments (BlocksRenderer being the Text one),
+ * contained within a singe Grid (1fr) in the Message component.
+ */
+export const blocksRendererSx: SxProps = {
+  // important, as the parent container is a Grid, and this takes up to the Grid's width
+  width: '100%',
+
+  // enables children's x-scrollbars (clips to the Fragment, so sub-parts will stay within this)
+  overflowX: 'auto',
+
   // note: this will be used for non-blocks mainly (errors and other strings ourside of RenderXYX)
   lineHeight: lineHeightChatTextMd,
-} as const;
 
-export const editBlocksSx: SxProps = {
-  ...blocksSx,
-  flexGrow: 1,
-} as const;
-
-const renderBlocksSx: SxProps = {
-  ...blocksSx,
-  flexGrow: 0,
-  overflowX: 'auto',
+  // customize the text selection color (also in edit mode)
   '& *::selection': {
     // backgroundColor: '#fc70c3',
     backgroundColor: 'primary.solidBg',
@@ -50,26 +48,28 @@ const renderBlocksSx: SxProps = {
 type BlocksRendererProps = {
   // required
   text: string;
-  fromRole: DMessage['role'];
+  fromRole: DMessageRole;
+
   contentScaling: ContentScaling;
+  fitScreen: boolean;
+  isBottom?: boolean;
+  showAsDanger?: boolean;
+  showAsItalic?: boolean;
+  showTopWarning?: string;
+  showUnsafeHtml?: boolean;
+  specialDiagramMode?: boolean;
+
   renderTextAsMarkdown: boolean;
   renderTextDiff?: TextDiff[];
 
-  errorMessage?: React.ReactNode;
-  fitScreen: boolean;
-  isBottom?: boolean;
-  showDate?: number;
-  showUnsafeHtml?: boolean;
-  wasUserEdited?: boolean;
-
-  specialDiagramMode?: boolean;
+  /**
+   * optimization: allow memo to all individual blocks except the last one
+   * work in progress on that
+   */
+  optiAllowSubBlocksMemo?: boolean;
 
   onContextMenu?: (event: React.MouseEvent) => void;
   onDoubleClick?: (event: React.MouseEvent) => void;
-  onImageRegenerate?: () => void;
-
-  // optimization: allow memo
-  optiAllowMemo?: boolean;
 };
 
 
@@ -80,10 +80,11 @@ export const BlocksRenderer = React.forwardRef<HTMLDivElement, BlocksRendererPro
   const prevBlocksRef = React.useRef<Block[]>([]);
 
   // derived state
-  const { text: _text, errorMessage, renderTextDiff, wasUserEdited = false } = props;
+  const { text: _text, renderTextDiff } = props;
   const fromAssistant = props.fromRole === 'assistant';
   const fromSystem = props.fromRole === 'system';
   const fromUser = props.fromRole === 'user';
+  const isUserCommand = fromUser && _text.startsWith('/');
 
 
   // Memo text, which could be 'collapsed' to a few lines in case of user messages
@@ -119,6 +120,8 @@ export const BlocksRenderer = React.forwardRef<HTMLDivElement, BlocksRendererPro
       fontWeight: 'md', // JetBrains Mono has a lighter weight, so we need that extra bump
       fontVariantLigatures: 'none',
       lineHeight: themeScalingMap[props.contentScaling]?.blockLineHeight ?? 1.75,
+      minWidth: 260,
+      minHeight: '2.75rem',
     }
   ), [fromAssistant, props.contentScaling, props.specialDiagramMode]);
 
@@ -134,21 +137,23 @@ export const BlocksRenderer = React.forwardRef<HTMLDivElement, BlocksRendererPro
     {
       fontSize: themeScalingMap[props.contentScaling]?.blockFontSize ?? undefined,
       lineHeight: themeScalingMap[props.contentScaling]?.blockLineHeight ?? 1.75,
+      ...(props.showAsDanger ? { color: 'danger.500', fontWeight: 500 } : {}),
+      ...(props.showAsItalic ? { fontStyle: 'italic' } : {}),
     }
-  ), [props.contentScaling]);
+  ), [props.contentScaling, props.showAsDanger, props.showAsItalic]);
 
 
   // Block splitter, with memoand special recycle of former blocks, to help React minimize render work
 
   const blocks = React.useMemo(() => {
     // split the complete input text into blocks
-    const newBlocks = errorMessage ? [] : parseMessageBlocks(text, fromSystem, renderTextDiff);
+    const newBlocks = parseMessageBlocks(text, fromSystem, renderTextDiff);
 
     // recycle the previous blocks if they are the same, for stable references to React
     const recycledBlocks: Block[] = [];
     for (let i = 0; i < newBlocks.length; i++) {
       const newBlock = newBlocks[i];
-      const prevBlock = prevBlocksRef.current[i];
+      const prevBlock: Block | undefined = prevBlocksRef.current[i];
 
       // Check if the new block can be replaced by the previous block to maintain reference stability
       if (prevBlock && areBlocksEqual(prevBlock, newBlock)) {
@@ -165,9 +170,9 @@ export const BlocksRenderer = React.forwardRef<HTMLDivElement, BlocksRendererPro
 
     // Apply specialDiagramMode filter if applicable
     return props.specialDiagramMode
-      ? recycledBlocks.filter(block => block.type === 'code' || recycledBlocks.length === 1)
+      ? recycledBlocks.filter(block => block.type === 'codeb' || recycledBlocks.length === 1)
       : recycledBlocks;
-  }, [errorMessage, fromSystem, props.specialDiagramMode, renderTextDiff, text]);
+  }, [fromSystem, props.specialDiagramMode, renderTextDiff, text]);
 
 
   return (
@@ -175,49 +180,34 @@ export const BlocksRenderer = React.forwardRef<HTMLDivElement, BlocksRendererPro
       ref={ref}
       onContextMenu={props.onContextMenu}
       onDoubleClick={props.onDoubleClick}
-      sx={renderBlocksSx}
+      sx={blocksRendererSx}
     >
 
-      {!!props.showDate && (
-        <Typography level='body-sm' sx={{ mx: 1.5, textAlign: fromAssistant ? 'left' : 'right' }}>
-          <TimeAgo date={props.showDate} />
-        </Typography>
-      )}
-
       {/* Warn about user-edited system message */}
-      {fromSystem && wasUserEdited && (
-        <Typography level='body-sm' color='warning' sx={{ mt: 1, mx: 1.5 }}>modified by user - auto-update disabled</Typography>
+      {!!props.showTopWarning?.length && (
+        <Typography level='body-sm' color='warning' sx={{ mt: 1, mx: 1.5 }}>{props.showTopWarning}</Typography>
       )}
 
-      {errorMessage ? (
-
-        <Tooltip title={<Typography sx={{ maxWidth: 800 }}>{text}</Typography>} variant='soft'>
-          <InlineError error={errorMessage} />
-        </Tooltip>
-
-      ) : (
-
-        // sequence of render components, for each Block
-        blocks.map(
-          (block, index) => {
-            // Optimization: only memo the non-currently-rendered components, if the message is still in flux
-            const optimizeWithMemo = props.optiAllowMemo && index !== blocks.length - 1;
-            const RenderCodeMemoOrNot = optimizeWithMemo ? RenderCodeMemo : RenderCode;
-            const RenderMarkdownMemoOrNot = optimizeWithMemo ? RenderMarkdownMemo : RenderMarkdown;
-            return block.type === 'html'
-              ? <RenderHtml key={'html-' + index} htmlBlock={block} sx={scaledCodeSx} />
-              : block.type === 'code'
-                ? <RenderCodeMemoOrNot key={'code-' + index} codeBlock={block} fitScreen={props.fitScreen} initialShowHTML={props.showUnsafeHtml} noCopyButton={props.specialDiagramMode} optimizeLightweight={!optimizeWithMemo} sx={scaledCodeSx} />
-                : block.type === 'image'
-                  ? <RenderImage key={'image-' + index} imageBlock={block} onRunAgain={props.isBottom ? props.onImageRegenerate : undefined} sx={scaledImageSx} />
-                  : block.type === 'diff'
-                    ? <RenderTextDiff key={'text-diff-' + index} diffBlock={block} sx={scaledTypographySx} />
-                    : (props.renderTextAsMarkdown && !fromSystem && !(fromUser && block.content.startsWith('/')))
-                      ? <RenderMarkdownMemoOrNot key={'text-md-' + index} textBlock={block} sx={scaledTypographySx} />
-                      : <RenderChatText key={'text-' + index} textBlock={block} sx={scaledTypographySx} />;
-          })
-
-      )}
+      {/* sequence of render components, for each Block */}
+      {blocks.map((block, index) => {
+        // Optimization: only memo the non-currently-rendered components, if the message is still in flux
+        const optimizeSubBlockWithMemo = props.optiAllowSubBlocksMemo && index !== blocks.length - 1;
+        const RenderCodeMemoOrNot = optimizeSubBlockWithMemo ? RenderCodeMemo : RenderCode;
+        const RenderMarkdownMemoOrNot = optimizeSubBlockWithMemo ? RenderMarkdownMemo : RenderMarkdown;
+        return block.type === 'htmlb'
+          ? <RenderHtml key={'html-' + index} htmlBlock={block} sx={scaledCodeSx} />
+          : block.type === 'codeb'
+            ? <RenderCodeMemoOrNot key={'code-' + index} codeBlock={block} fitScreen={props.fitScreen} initialShowHTML={props.showUnsafeHtml} noCopyButton={props.specialDiagramMode} optimizeLightweight={!optimizeSubBlockWithMemo} sx={scaledCodeSx} />
+            : block.type === 'imageb'
+              ? <RenderImageURL key={'image-' + index} imageURL={block.url} infoText={block.alt}
+                                onImageRegenerate={undefined /* because there could be many of these URL images in a fragment, and we miss the whole partial-edit logic in a text fragment */}
+                                scaledImageSx={scaledImageSx} />
+              : block.type === 'diffb'
+                ? <RenderTextDiff key={'text-diff-' + index} diffBlock={block} sx={scaledTypographySx} />
+                : (props.renderTextAsMarkdown && !fromSystem && !isUserCommand)
+                  ? <RenderMarkdownMemoOrNot key={'text-md-' + index} textBlock={block} sx={scaledTypographySx} />
+                  : <RenderChatText key={'text-' + index} textBlock={block} sx={scaledTypographySx} />;
+      })}
 
       {isTextCollapsed ? (
         <Box sx={{ textAlign: 'right' }}><Button variant='soft' size='sm' onClick={handleTextUncollapse} startDecorator={<ExpandMoreIcon />} sx={{ minWidth: 120 }}>Expand</Button></Box>

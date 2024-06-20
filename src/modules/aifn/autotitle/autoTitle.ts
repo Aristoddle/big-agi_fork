@@ -1,14 +1,15 @@
 import { getFastLLMId } from '~/modules/llms/store-llms';
 import { llmChatGenerateOrThrow, VChatMessageIn } from '~/modules/llms/llm.client';
 
-import { useChatStore } from '~/common/state/store-chats';
+import { messageFragmentsReduceText } from '~/common/stores/chat/chat.message';
+import { useChatStore } from '~/common/stores/chat/store-chats';
 
 
 /**
  * Creates the AI titles for conversations, by taking the last 5 first-lines and asking AI what's that about
  * @returns true if the title was actually replaced (for instance, it may not be needed)
  */
-export async function conversationAutoTitle(conversationId: string, forceReplace: boolean): Promise<boolean> {
+export async function autoConversationTitle(conversationId: string, forceReplace: boolean): Promise<boolean> {
 
   // use valid fast model
   const fastLLMId = getFastLLMId();
@@ -26,7 +27,8 @@ export async function conversationAutoTitle(conversationId: string, forceReplace
 
   // first line of the last 5 messages
   const historyLines: string[] = conversation.messages.filter(m => m.role !== 'system').slice(-5).map(m => {
-    let text = m.text.split('\n')[0];
+    const messageText = messageFragmentsReduceText(m.fragments);
+    let text = messageText.split('\n')[0];
     text = text.length > 50 ? text.substring(0, 50) + '...' : text;
     text = `${m.role === 'user' ? 'You' : 'Assistant'}: ${text}`;
     return `- ${text}`;
@@ -35,16 +37,15 @@ export async function conversationAutoTitle(conversationId: string, forceReplace
   try {
     // LLM chat-generate call
     const instructions: VChatMessageIn[] = [
-      { role: 'system', content: `You are an AI conversation titles assistant who specializes in creating expressive yet few-words chat titles.` },
-      {
-        role: 'user', content:
-          'Analyze the given short conversation (every line is truncated) and extract a concise chat title that ' +
-          'summarizes the conversation in as little as a couple of words.\n' +
-          'Only respond with the lowercase short title and nothing else.\n' +
-          '\n' +
-          '```\n' +
-          historyLines.join('\n') +
-          '```\n',
+        { role: 'system', content: `You are an AI conversation titles assistant who specializes in creating expressive yet few-words chat titles.` },
+        {
+          role: 'user', content: `
+Analyze the given short conversation (every line is truncated) and extract a concise chat title that summarizes the conversation in as little as a couple of words.
+Only respond with the lowercase short title and nothing else.
+
+\`\`\`
+${historyLines.join('\n')}
+\`\`\``.trim(),
       },
     ];
     const chatResponse = await llmChatGenerateOrThrow(

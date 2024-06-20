@@ -1,7 +1,8 @@
 import { create } from 'zustand';
-import { v4 as uuidv4 } from 'uuid';
 
 import type { SnackbarTypeMap } from '@mui/joy';
+
+import { agiUuid } from '~/common/util/idUtils';
 
 
 export const SNACKBAR_ANIMATION_DURATION = 200;
@@ -9,7 +10,7 @@ export const SNACKBAR_ANIMATION_DURATION = 200;
 export interface SnackbarMessage {
   key: string;
   message: string;
-  type: 'success' | 'issue' | 'title';
+  type: 'success' | 'issue' | 'title' | 'info';
   closeButton?: boolean,
   overrides?: Partial<SnackbarTypeMap['props']>;
 }
@@ -42,7 +43,7 @@ export const useSnackbarsStore = create<SnackbarStore>()(
       let { key, ...rest } = snackbar;
 
       // unique key
-      key += '-' + uuidv4();
+      key += '-' + agiUuid('snackbar-item');
 
       // append the snackbar
       const newSnackbar = { key, ...rest };

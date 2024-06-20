@@ -109,15 +109,14 @@ export const navItems: {
     },
     {
       name: 'Draw',
-      barTitle: 'Generate Images',
       icon: FormatPaintOutlinedIcon,
       iconActive: FormatPaintTwoToneIcon,
       type: 'app',
       route: '/draw',
-      // hideOnMobile: true,
       hideDrawer: true,
-      isDev: true,
-      _delete: true,
+      // hideOnMobile: true,
+      // isDev: true,
+      // _delete: true,
     },
     {
       name: 'Cortex',

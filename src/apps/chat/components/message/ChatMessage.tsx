@@ -1,207 +1,55 @@
 import * as React from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import TimeAgo from 'react-timeago';
 
 import type { SxProps } from '@mui/joy/styles/types';
-import { Avatar, Box, ButtonGroup, CircularProgress, IconButton, ListDivider, ListItem, ListItemDecorator, MenuItem, Switch, Tooltip, Typography } from '@mui/joy';
+import { Box, ButtonGroup, CircularProgress, IconButton, ListDivider, ListItem, ListItemDecorator, MenuItem, Switch, Tooltip, Typography } from '@mui/joy';
 import { ClickAwayListener, Popper } from '@mui/base';
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
+import CheckRoundedIcon from '@mui/icons-material/CheckRounded';
 import ClearIcon from '@mui/icons-material/Clear';
+import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import DifferenceIcon from '@mui/icons-material/Difference';
 import EditRoundedIcon from '@mui/icons-material/EditRounded';
-import Face6Icon from '@mui/icons-material/Face6';
 import ForkRightIcon from '@mui/icons-material/ForkRight';
 import FormatPaintOutlinedIcon from '@mui/icons-material/FormatPaintOutlined';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import RecordVoiceOverOutlinedIcon from '@mui/icons-material/RecordVoiceOverOutlined';
 import ReplayIcon from '@mui/icons-material/Replay';
 import ReplyRoundedIcon from '@mui/icons-material/ReplyRounded';
-import SettingsSuggestIcon from '@mui/icons-material/SettingsSuggest';
-import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 import StarOutlineRoundedIcon from '@mui/icons-material/StarOutlineRounded';
 import StarRoundedIcon from '@mui/icons-material/StarRounded';
 import TelegramIcon from '@mui/icons-material/Telegram';
 import VerticalAlignBottomIcon from '@mui/icons-material/VerticalAlignBottom';
 
-import { SystemPurposeId, SystemPurposes } from '../../../../data';
-
-import { BlocksRenderer, editBlocksSx } from '~/modules/blocks/BlocksRenderer';
-import { useSanityTextDiffs } from '~/modules/blocks/RenderTextDiff';
-
 import { ChatBeamIcon } from '~/common/components/icons/ChatBeamIcon';
 import { CloseableMenu } from '~/common/components/CloseableMenu';
-import { DMessage, DMessageUserFlag, messageHasUserFlag } from '~/common/state/store-chats';
-import { InlineTextarea } from '~/common/components/InlineTextarea';
 import { KeyStroke } from '~/common/components/KeyStroke';
-import { Link } from '~/common/components/Link';
 import { adjustContentScaling, themeScalingMap, themeZIndexPageBar } from '~/common/app.theme';
 import { animationColorRainbow } from '~/common/util/animUtils';
 import { copyToClipboard } from '~/common/util/clipboardUtils';
+import { createTextContentFragment, DMessage, DMessageAttachmentFragment, DMessageContentFragment, DMessageFragment, DMessageFragmentId, DMessageId, DMessageUserFlag, messageFragmentsReduceText, messageHasUserFlag } from '~/common/stores/chat/chat.message';
 import { prettyBaseModel } from '~/common/util/modelUtils';
 import { useUIPreferencesStore } from '~/common/state/store-ui';
 
+import { AttachmentFragments } from './fragments-attachments/AttachmentFragments';
+import { ContentFragments } from './fragments-content/ContentFragments';
 import { ReplyToBubble } from './ReplyToBubble';
+import { avatarIconSx, makeMessageAvatar, messageBackground, personaColumnSx } from './messageUtils';
 import { useChatShowTextDiff } from '../../store-app-chat';
 
 
 // Enable the menu on text selection
-const ENABLE_SELECTION_RIGHT_CLICK_MENU = false;
-const ENABLE_SELECTION_TOOLBAR = true;
-const SELECTION_TOOLBAR_MIN_LENGTH = 3;
+const ENABLE_CONTEXT_MENU = false;
+const ENABLE_BUBBLE = true;
+const BUBBLE_MIN_TEXT_LENGTH = 3;
 
 // Enable the hover button to copy the whole message. The Copy button is also available in Blocks, or in the Avatar Menu.
 const ENABLE_COPY_MESSAGE_OVERLAY: boolean = false;
 
 
-export function messageBackground(messageRole: DMessage['role'] | string, wasEdited: boolean, isAssistantIssue: boolean): string {
-  switch (messageRole) {
-    case 'user':
-      return 'primary.plainHoverBg'; // was .background.level1
-    case 'assistant':
-      return isAssistantIssue ? 'danger.softBg' : 'background.surface';
-    case 'system':
-      return wasEdited ? 'warning.softHoverBg' : 'neutral.softBg';
-    default:
-      return '#ff0000';
-  }
-}
-
-const avatarIconSx = {
-  width: 36,
-  height: 36,
-};
-
-const personaSx: SxProps = {
-  // make this stick to the top of the screen
-  position: 'sticky',
-  top: 0,
-
-  // flexBasis: 0, // this won't let the item grow
-  minWidth: { xs: 50, md: 64 },
-  maxWidth: 80,
-  textAlign: 'center',
-  // layout
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-};
-
-
-export function makeAvatar(messageAvatar: string | null, messageRole: DMessage['role'] | string, messageOriginLLM: string | undefined, messagePurposeId: SystemPurposeId | undefined, messageSender: string, messageTyping: boolean, size: 'sm' | undefined = undefined): React.JSX.Element {
-  if (typeof messageAvatar === 'string' && messageAvatar)
-    return <Avatar alt={messageSender} src={messageAvatar} />;
-
-  const mascotSx = size === 'sm' ? avatarIconSx : { width: 64, height: 64 };
-  switch (messageRole) {
-    case 'system':
-      return <SettingsSuggestIcon sx={avatarIconSx} />;  // https://em-content.zobj.net/thumbs/120/apple/325/robot_1f916.png
-
-    case 'user':
-      return <Face6Icon sx={avatarIconSx} />;            // https://www.svgrepo.com/show/306500/openai.svg
-
-    case 'assistant':
-      // typing gif (people seem to love this, so keeping it after april fools')
-      const isDownload = messageOriginLLM === 'web';
-      const isTextToImage = messageOriginLLM === 'DALL·E' || messageOriginLLM === 'Prodia';
-      const isReact = messageOriginLLM?.startsWith('react-');
-
-      // animation: message typing
-      if (messageTyping)
-        return <Avatar
-          alt={messageSender} variant='plain'
-          src={isDownload ? 'https://i.giphy.com/26u6dIwIphLj8h10A.webp' // hourglass: https://i.giphy.com/TFSxpAIYz5inJGuY8f.webp, small-lq: https://i.giphy.com/131tNuGktpXGhy.webp, floppy: https://i.giphy.com/RxR1KghIie2iI.webp
-            : isTextToImage ? 'https://i.giphy.com/media/5t9ujj9cMisyVjUZ0m/giphy.webp' // brush
-              : isReact ? 'https://i.giphy.com/media/l44QzsOLXxcrigdgI/giphy.webp' // mind
-                : 'https://i.giphy.com/media/jJxaUysjzO9ri/giphy.webp'} // typing
-          sx={{ ...mascotSx, borderRadius: 'sm' }}
-        />;
-
-      // icon: text-to-image
-      if (isTextToImage)
-        return <FormatPaintOutlinedIcon sx={{
-          ...avatarIconSx,
-          animation: `${animationColorRainbow} 1s linear 2.66`,
-        }} />;
-
-      // purpose symbol (if present)
-      const symbol = SystemPurposes[messagePurposeId!]?.symbol;
-      if (symbol)
-        return <Box sx={{
-          fontSize: '24px',
-          textAlign: 'center',
-          width: '100%',
-          minWidth: `${avatarIconSx.width}px`,
-          lineHeight: `${avatarIconSx.height}px`,
-        }}>
-          {symbol}
-        </Box>;
-
-      // default assistant avatar
-      return <SmartToyOutlinedIcon sx={avatarIconSx} />; // https://mui.com/static/images/avatar/2.jpg
-  }
-  return <Avatar alt={messageSender} />;
-}
-
-function explainErrorInMessage(text: string, isAssistant: boolean, modelId?: string) {
-  const isAssistantError = isAssistant && (text.startsWith('[Issue] ') || text.startsWith('[OpenAI Issue]'));
-  let errorMessage: React.JSX.Element | null = null;
-  if (!isAssistantError)
-    return { errorMessage, isAssistantError };
-
-  // [OpenAI] "Service Temporarily Unavailable (503)", {"code":503,"message":"Service Unavailable.","param":null,"type":"cf_service_unavailable"}
-  if (text.includes('"cf_service_unavailable"')) {
-    errorMessage = <>
-      The OpenAI servers appear to be having trouble at the moment. Kindly follow
-      the <Link noLinkStyle href='https://status.openai.com/' target='_blank'>OpenAI Status</Link> page
-      for up to date information, and at your option try again.
-    </>;
-  }
-  // ...
-  else if (text.startsWith('OpenAI API error: 429 Too Many Requests')) {
-    // TODO: retry at the api/chat level a few times instead of showing this error
-    errorMessage = <>
-      The model appears to be occupied at the moment. Kindly select <b>GPT-3.5 Turbo</b>,
-      or give it another go by selecting <b>Run again</b> from the message menu.
-    </>;
-  } else if (text.includes('"model_not_found"')) {
-    // note that "model_not_found" is different than "The model `gpt-xyz` does not exist" message
-    errorMessage = <>
-      The API key appears to be unauthorized for {modelId || 'this model'}. You can change to <b>GPT-3.5
-      Turbo</b> and simultaneously <Link noLinkStyle href='https://openai.com/waitlist/gpt-4-api' target='_blank'>request
-      access</Link> to the desired model.
-    </>;
-  } else if (text.includes('"context_length_exceeded"')) {
-    // TODO: propose to summarize or split the input?
-    const pattern = /maximum context length is (\d+) tokens.+resulted in (\d+) tokens/;
-    const match = pattern.exec(text);
-    const usedText = match ? <b>{parseInt(match[2] || '0').toLocaleString()} tokens &gt; {parseInt(match[1] || '0').toLocaleString()}</b> : '';
-    errorMessage = <>
-      This thread <b>surpasses the maximum size</b> allowed for {modelId || 'this model'}. {usedText}.
-      Please consider removing some earlier messages from the conversation, start a new conversation,
-      choose a model with larger context, or submit a shorter new message.
-      {!usedText && ` -- ${text}`}
-    </>;
-  }
-  // [OpenAI] {"error":{"message":"Incorrect API key provided: ...","type":"invalid_request_error","param":null,"code":"invalid_api_key"}}
-  else if (text.includes('"invalid_api_key"')) {
-    errorMessage = <>
-      The API key appears to be incorrect or to have expired.
-      Please <Link noLinkStyle href='https://platform.openai.com/account/api-keys' target='_blank'>check your
-      API key</Link> and update it in <b>Models</b>.
-    </>;
-  } else if (text.includes('"insufficient_quota"')) {
-    errorMessage = <>
-      The API key appears to have <b>insufficient quota</b>. Please
-      check <Link noLinkStyle href='https://platform.openai.com/account/usage' target='_blank'>your usage</Link> and
-      make sure the usage is under <Link noLinkStyle href='https://platform.openai.com/account/billing/limits' target='_blank'>the limits</Link>.
-    </>;
-  }
-  // else
-  //  errorMessage = <>{text || 'Unknown error'}</>;
-
-  return { errorMessage, isAssistantError };
-}
-
+export type ChatMessageTextContentEditState = { [fragmentId: DMessageFragmentId]: string };
 
 export const ChatMessageMemo = React.memo(ChatMessage);
 
@@ -217,6 +65,7 @@ export function ChatMessage(props: {
   message: DMessage,
   diffPreviousText?: string,
   fitScreen: boolean,
+  isMobileForAvatar?: boolean,
   isBottom?: boolean,
   isImagining?: boolean,
   isSpeaking?: boolean,
@@ -229,7 +78,8 @@ export function ChatMessage(props: {
   onMessageBeam?: (messageId: string) => Promise<void>,
   onMessageBranch?: (messageId: string) => void,
   onMessageDelete?: (messageId: string) => void,
-  onMessageEdit?: (messageId: string, text: string) => void,
+  onMessageFragmentDelete?: (messageId: DMessageId, fragmentId: DMessageFragmentId) => void,
+  onMessageFragmentReplace?: (messageId: DMessageId, fragmentId: DMessageFragmentId, newFragment: DMessageFragment) => void,
   onMessageToggleUserFlag?: (messageId: string, flag: DMessageUserFlag) => void,
   onMessageTruncate?: (messageId: string) => void,
   onReplyTo?: (messageId: string, selectedText: string) => void,
@@ -242,11 +92,11 @@ export function ChatMessage(props: {
   // state
   const blocksRendererRef = React.useRef<HTMLDivElement>(null);
   const [isHovering, setIsHovering] = React.useState(false);
-  const [opsMenuAnchor, setOpsMenuAnchor] = React.useState<HTMLElement | null>(null);
-  const [selMenuAnchor, setSelMenuAnchor] = React.useState<HTMLElement | null>(null);
-  const [selToolbarAnchor, setSelToolbarAnchor] = React.useState<HTMLElement | null>(null);
   const [selText, setSelText] = React.useState<string | null>(null);
-  const [isEditing, setIsEditing] = React.useState(false);
+  const [bubbleAnchor, setBubbleAnchor] = React.useState<HTMLElement | null>(null);
+  const [contextMenuAnchor, setContextMenuAnchor] = React.useState<HTMLElement | null>(null);
+  const [opsMenuAnchor, setOpsMenuAnchor] = React.useState<HTMLElement | null>(null);
+  const [textContentEditState, setTextContentEditState] = React.useState<ChatMessageTextContentEditState | null>(null);
 
   // external state
   const { showAvatar, contentScaling, doubleClickToEdit, renderMarkdown } = useUIPreferencesStore(useShallow(state => ({
@@ -256,16 +106,16 @@ export function ChatMessage(props: {
     renderMarkdown: state.renderMarkdown,
   })));
   const [showDiff, setShowDiff] = useChatShowTextDiff();
-  const textDiffs = useSanityTextDiffs(props.message.text, props.diffPreviousText, showDiff);
+
 
   // derived state
   const {
     id: messageId,
-    text: messageText,
-    sender: messageSender,
-    avatar: messageAvatar,
-    typing: messageTyping,
     role: messageRole,
+    fragments: messageFragments,
+    pendingIncomplete: messagePendingIncomplete,
+    avatar: messageAvatar,
+    sender: messageSender,
     purposeId: messagePurposeId,
     originLLM: messageOriginLLM,
     metadata: messageMetadata,
@@ -279,21 +129,54 @@ export function ChatMessage(props: {
   const fromSystem = messageRole === 'system';
   const wasEdited = !!messageUpdated;
 
-  const textSel = selText ? selText : messageText;
+  const textSel = selText ? selText : messageFragmentsReduceText(messageFragments);
   const isSpecialT2I = textSel.startsWith('https://images.prodia.xyz/') || textSel.startsWith('/draw ') || textSel.startsWith('/imagine ') || textSel.startsWith('/img ');
   const couldDiagram = textSel.length >= 100 && !isSpecialT2I;
   const couldImagine = textSel.length >= 3 && !isSpecialT2I;
   const couldSpeak = couldImagine;
 
-
-  const handleTextEdited = (editedText: string) => {
-    setIsEditing(false);
-    if (props.onMessageEdit && editedText?.trim() && editedText !== messageText)
-      props.onMessageEdit(messageId, editedText);
-  };
+  const attachmentFragments = messageFragments.filter(f => f.ft === 'attachment') as DMessageAttachmentFragment[];
 
 
-  // Operations Menu
+  // TODO: fix the diffing
+  // const textDiffs = useSanityTextDiffs(messageText, props.diffPreviousText, showDiff);
+
+
+  const { onMessageFragmentDelete, onMessageFragmentReplace } = props;
+
+  const handleFragmentDelete = React.useCallback((fragmentId: DMessageFragmentId) => {
+    onMessageFragmentDelete?.(messageId, fragmentId);
+  }, [messageId, onMessageFragmentDelete]);
+
+  const handleFragmentReplace = React.useCallback((fragmentId: DMessageFragmentId, newContent: DMessageContentFragment) => {
+    onMessageFragmentReplace?.(messageId, fragmentId, newContent);
+  }, [messageId, onMessageFragmentReplace]);
+
+
+  // Text Editing
+
+  const isEditingText = !!textContentEditState;
+
+  const handleEditsApply = React.useCallback(() => {
+    const state = textContentEditState || {};
+    setTextContentEditState(null);
+    Object.entries(state).forEach(([fragmentId, editedText]) => {
+      if (editedText.length > 0)
+        handleFragmentReplace(fragmentId, createTextContentFragment(editedText));
+      else
+        handleFragmentDelete(fragmentId);
+    });
+  }, [handleFragmentDelete, handleFragmentReplace, textContentEditState]);
+
+  const handleEditsBegin = React.useCallback(() => setTextContentEditState({}), []);
+
+  const handleEditsCancel = React.useCallback(() => setTextContentEditState(null), []);
+
+  const handleEditSetText = React.useCallback((fragmentId: DMessageFragmentId, editedText: string) =>
+    setTextContentEditState((prev): ChatMessageTextContentEditState => ({ ...prev, [fragmentId]: editedText || '' })), []);
+
+
+  // Message Operations Menu
 
   const { onMessageToggleUserFlag } = props;
 
@@ -308,16 +191,17 @@ export function ChatMessage(props: {
     copyToClipboard(textSel, 'Text');
     e.preventDefault();
     handleCloseOpsMenu();
-    closeSelectionMenu();
-    closeToolbar();
+    closeContextMenu();
+    closeBubble();
   };
 
-  const handleOpsEdit = React.useCallback((e: React.MouseEvent) => {
-    if (messageTyping && !isEditing) return; // don't allow editing while typing
-    setIsEditing(!isEditing);
+  const handleOpsEditToggle = React.useCallback((e: React.MouseEvent) => {
+    if (messagePendingIncomplete && !isEditingText) return; // don't allow editing while incomplete
+    if (isEditingText) handleEditsCancel();
+    else handleEditsBegin();
     e.preventDefault();
     handleCloseOpsMenu();
-  }, [handleCloseOpsMenu, isEditing, messageTyping]);
+  }, [handleCloseOpsMenu, handleEditsBegin, handleEditsCancel, isEditingText, messagePendingIncomplete]);
 
   const handleOpsToggleStarred = React.useCallback(() => {
     onMessageToggleUserFlag?.(messageId, 'starred');
@@ -349,8 +233,8 @@ export function ChatMessage(props: {
     if (props.onTextDiagram) {
       await props.onTextDiagram(messageId, textSel);
       handleCloseOpsMenu();
-      closeSelectionMenu();
-      closeToolbar();
+      closeContextMenu();
+      closeBubble();
     }
   };
 
@@ -359,18 +243,18 @@ export function ChatMessage(props: {
     if (props.onTextImagine) {
       await props.onTextImagine(textSel);
       handleCloseOpsMenu();
-      closeSelectionMenu();
-      closeToolbar();
+      closeContextMenu();
+      closeBubble();
     }
   };
 
   const handleOpsReplyTo = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (props.onReplyTo && textSel.trim().length >= SELECTION_TOOLBAR_MIN_LENGTH) {
+    if (props.onReplyTo && textSel.trim().length >= BUBBLE_MIN_TEXT_LENGTH) {
       props.onReplyTo(messageId, textSel.trim());
       handleCloseOpsMenu();
-      closeSelectionMenu();
-      closeToolbar();
+      closeContextMenu();
+      closeBubble();
     }
   };
 
@@ -379,8 +263,8 @@ export function ChatMessage(props: {
     if (props.onTextSpeak) {
       await props.onTextSpeak(textSel);
       handleCloseOpsMenu();
-      closeSelectionMenu();
-      closeToolbar();
+      closeContextMenu();
+      closeBubble();
     }
   };
 
@@ -394,24 +278,24 @@ export function ChatMessage(props: {
   };
 
 
-  // Selection Menu
+  // Context Menu
 
-  const removeSelectionAnchor = React.useCallback(() => {
-    if (selMenuAnchor) {
+  const removeContextAnchor = React.useCallback(() => {
+    if (contextMenuAnchor) {
       try {
-        document.body.removeChild(selMenuAnchor);
+        document.body.removeChild(contextMenuAnchor);
       } catch (e) {
         // ignore...
       }
     }
-  }, [selMenuAnchor]);
+  }, [contextMenuAnchor]);
 
-  const openSelectionMenu = React.useCallback((event: MouseEvent, selectedText: string) => {
+  const openContextMenu = React.useCallback((event: MouseEvent, selectedText: string) => {
     event.stopPropagation();
     event.preventDefault();
 
     // remove any stray anchor
-    removeSelectionAnchor();
+    removeContextAnchor();
 
     // create a temporary fixed anchor element to position the menu
     const anchorEl = document.createElement('div');
@@ -420,16 +304,16 @@ export function ChatMessage(props: {
     anchorEl.style.top = `${event.clientY}px`;
     document.body.appendChild(anchorEl);
 
-    setSelMenuAnchor(anchorEl);
+    setContextMenuAnchor(anchorEl);
     setSelText(selectedText);
-  }, [removeSelectionAnchor]);
+  }, [removeContextAnchor]);
 
-  const closeSelectionMenu = React.useCallback(() => {
+  const closeContextMenu = React.useCallback(() => {
     // window.getSelection()?.removeAllRanges?.();
-    removeSelectionAnchor();
-    setSelMenuAnchor(null);
+    removeContextAnchor();
+    setContextMenuAnchor(null);
     setSelText(null);
-  }, [removeSelectionAnchor]);
+  }, [removeContextAnchor]);
 
   const handleContextMenu = React.useCallback((event: MouseEvent) => {
     const selection = window.getSelection();
@@ -437,33 +321,34 @@ export function ChatMessage(props: {
       const range = selection.getRangeAt(0);
       const selectedText = range.toString().trim();
       if (selectedText.length > 0)
-        openSelectionMenu(event, selectedText);
+        openContextMenu(event, selectedText);
     }
-  }, [openSelectionMenu]);
+  }, [openContextMenu]);
 
 
-  // Selection Toolbar
+  // Bubble
 
-  const closeToolbar = React.useCallback((anchorEl?: HTMLElement) => {
+  const closeBubble = React.useCallback((anchorEl?: HTMLElement) => {
     window.getSelection()?.removeAllRanges?.();
     try {
-      const anchor = anchorEl || selToolbarAnchor;
+      const anchor = anchorEl || bubbleAnchor;
       anchor && document.body.removeChild(anchor);
     } catch (e) {
       // ignore...
     }
-    setSelToolbarAnchor(null);
+    setBubbleAnchor(null);
     setSelText(null);
-  }, [selToolbarAnchor]);
+  }, [bubbleAnchor]);
 
-  const handleOpenToolbar = React.useCallback((_event: MouseEvent) => {
+  // restore blocksRendererRef
+  const handleOpenBubble = React.useCallback((_event: MouseEvent) => {
     // check for selection
     const selection = window.getSelection();
     if (!selection || selection.rangeCount <= 0) return;
 
     // check for enought selection
     const selectionText = selection.toString().trim();
-    if (selectionText.length < SELECTION_TOOLBAR_MIN_LENGTH) return;
+    if (selectionText.length < BUBBLE_MIN_TEXT_LENGTH) return;
 
     // check for the selection being inside the blocks renderer (core of the message)
     const selectionRange = selection.getRangeAt(0);
@@ -485,15 +370,15 @@ export function ChatMessage(props: {
     const closeOnUnselect = () => {
       const selection = window.getSelection();
       if (!selection || selection.toString().trim() === '') {
-        closeToolbar(anchorEl);
+        closeBubble(anchorEl);
         document.removeEventListener('selectionchange', closeOnUnselect);
       }
     };
     document.addEventListener('selectionchange', closeOnUnselect);
 
-    setSelToolbarAnchor(anchorEl);
-    setSelText(selectionText);
-  }, [closeToolbar]);
+    setBubbleAnchor(anchorEl);
+    setSelText(selectionText); /* TODO: operate on the underlying content, not the rendered text */
+  }, [closeBubble]);
 
 
   // Blocks renderer
@@ -503,34 +388,28 @@ export function ChatMessage(props: {
   }, [handleContextMenu]);
 
   const handleBlocksDoubleClick = React.useCallback((event: React.MouseEvent) => {
-    doubleClickToEdit && props.onMessageEdit && handleOpsEdit(event);
-  }, [doubleClickToEdit, handleOpsEdit, props.onMessageEdit]);
+    doubleClickToEdit && props.onMessageFragmentReplace && handleOpsEditToggle(event);
+  }, [doubleClickToEdit, handleOpsEditToggle, props.onMessageFragmentReplace]);
 
   const handleBlocksMouseUp = React.useCallback((event: React.MouseEvent) => {
-    handleOpenToolbar(event.nativeEvent);
-  }, [handleOpenToolbar]);
+    handleOpenBubble(event.nativeEvent);
+  }, [handleOpenBubble]);
 
-
-  // prettier upstream errors
-  const { isAssistantError, errorMessage } = React.useMemo(
-    () => explainErrorInMessage(messageText, fromAssistant, messageOriginLLM),
-    [messageText, fromAssistant, messageOriginLLM],
-  );
 
   // style
-  const backgroundColor = messageBackground(messageRole, wasEdited, isAssistantError && !errorMessage);
+  const backgroundColor = messageBackground(messageRole, wasEdited, false /*isAssistantError && !errorMessage*/);
 
   // avatar
   const avatarEl: React.JSX.Element | null = React.useMemo(
-    () => showAvatar ? makeAvatar(messageAvatar, messageRole, messageOriginLLM, messagePurposeId, messageSender, messageTyping) : null,
-    [messageAvatar, messageOriginLLM, messagePurposeId, messageRole, messageSender, messageTyping, showAvatar],
+    () => showAvatar ? makeMessageAvatar(messageAvatar, messageRole, messageOriginLLM, messagePurposeId, messageSender, !!messagePendingIncomplete, true) : null,
+    [messageAvatar, messageOriginLLM, messagePendingIncomplete, messagePurposeId, messageRole, messageSender, showAvatar],
   );
 
 
   return (
     <ListItem
       role='chat-message'
-      onMouseUp={(ENABLE_SELECTION_TOOLBAR && !fromSystem && !isAssistantError) ? handleBlocksMouseUp : undefined}
+      onMouseUp={(ENABLE_BUBBLE && !fromSystem /*&& !isAssistantError*/) ? handleBlocksMouseUp : undefined}
       sx={{
         // style
         backgroundColor: backgroundColor,
@@ -565,7 +444,7 @@ export function ChatMessage(props: {
       {/* (Optional) underlayed top decorator */}
       {props.topDecorator}
 
-      {/* Message Row: Avatar, Blocks (1 text -> blocksRenderer) */}
+      {/* Message Row: Avatar, Fragment[] */}
       <Box sx={{
         display: 'flex',
         flexDirection: !fromAssistant ? 'row-reverse' : 'row',
@@ -573,16 +452,30 @@ export function ChatMessage(props: {
         gap: { xs: 0, md: 1 },
       }}>
 
+        {/* Editing: Apply */}
+        {isEditingText && (
+          <Box sx={personaColumnSx}>
+            <Tooltip arrow disableInteractive title='Apply Edits'>
+              <IconButton variant='solid' color='warning' onClick={handleEditsApply}>
+                <CheckRoundedIcon />
+              </IconButton>
+            </Tooltip>
+            {/*<Typography level='body-xs' sx={{ overflowWrap: 'anywhere' }}>*/}
+            {/*  Save*/}
+            {/*</Typography>*/}
+          </Box>
+        )}
+
         {/* Avatar (Persona) */}
-        {showAvatar && (
-          <Box sx={personaSx}>
+        {showAvatar && !isEditingText && (
+          <Box sx={personaColumnSx}>
 
             {/* Persona Avatar or Menu Button */}
             <Box
               onClick={handleOpsMenuToggle}
               onContextMenu={handleOpsMenuToggle}
-              onMouseEnter={() => setIsHovering(true)}
-              onMouseLeave={() => setIsHovering(false)}
+              onMouseEnter={props.isMobileForAvatar ? undefined : () => setIsHovering(true)}
+              onMouseLeave={props.isMobileForAvatar ? undefined : () => setIsHovering(false)}
               sx={{ display: 'flex' }}
             >
               {(isHovering || opsMenuAnchor) ? (
@@ -594,12 +487,12 @@ export function ChatMessage(props: {
               )}
             </Box>
 
-            {/* Assistant model name */}
+            {/* Assistant (llm/function) name */}
             {fromAssistant && (
-              <Tooltip arrow title={messageTyping ? null : (messageOriginLLM || 'unk-model')} variant='solid'>
+              <Tooltip arrow title={messagePendingIncomplete ? null : (messageOriginLLM || 'unk-model')} variant='solid'>
                 <Typography level='body-xs' sx={{
                   overflowWrap: 'anywhere',
-                  ...(messageTyping ? { animation: `${animationColorRainbow} 5s linear infinite` } : {}),
+                  ...(messagePendingIncomplete ? { animation: `${animationColorRainbow} 5s linear infinite` } : {}),
                 }}>
                   {prettyBaseModel(messageOriginLLM)}
                 </Typography>
@@ -609,46 +502,96 @@ export function ChatMessage(props: {
           </Box>
         )}
 
+        {/* Fragments vertical (grid) layout */}
+        <Box sx={{
+          // v-center content if there's any gap
+          my: 'auto',
+          flexGrow: isEditingText ? 1 : 0,
 
-        {/* Edit / Blocks */}
-        {isEditing ? (
+          // v-layout
+          display: 'grid',
+          gap: isEditingText ? 2 : 1, // gap in between the fragments (if > 1)
 
-          <InlineTextarea
-            initialText={messageText} onEdit={handleTextEdited}
-            sx={editBlocksSx}
-          />
+          // horizontal separator between messages (second part+ and before)
+          // '& > *:not(:first-child)': {
+          //   borderTop: '1px solid',
+          //   borderTopColor: 'background.level3',
+          // },
+        }}>
 
-        ) : (
+          {/* Optional Message date */}
+          {(props.showBlocksDate === true && !!(messageUpdated || messageCreated)) && (
+            <Typography level='body-sm' sx={{ mx: 1.5, textAlign: fromAssistant ? 'left' : 'right' }}>
+              <TimeAgo date={messageUpdated || messageCreated} />
+            </Typography>
+          )}
 
-          <BlocksRenderer
-            ref={blocksRendererRef}
-            text={messageText}
-            fromRole={messageRole}
+          {/* Content Fragments (iterating all to preserve the index) */}
+          <ContentFragments
+            fragments={messageFragments}
+
             contentScaling={contentScaling}
-            errorMessage={errorMessage}
             fitScreen={props.fitScreen}
             isBottom={props.isBottom}
+            messageOriginLLM={messageOriginLLM}
+            messageRole={messageRole}
+            optiAllowSubBlocksMemo={!!messagePendingIncomplete}
             renderTextAsMarkdown={renderMarkdown}
-            renderTextDiff={textDiffs || undefined}
-            showDate={props.showBlocksDate === true ? messageUpdated || messageCreated || undefined : undefined}
+            showTopWarning={(fromSystem && wasEdited) ? 'modified by user - auto-update disabled' : undefined}
             showUnsafeHtml={props.showUnsafeHtml}
-            wasUserEdited={wasEdited}
-            onContextMenu={(props.onMessageEdit && ENABLE_SELECTION_RIGHT_CLICK_MENU) ? handleBlocksContextMenu : undefined}
-            onDoubleClick={(props.onMessageEdit && doubleClickToEdit) ? handleBlocksDoubleClick : undefined}
-            optiAllowMemo={messageTyping}
+
+            textEditsState={textContentEditState}
+            setEditedText={handleEditSetText}
+            onEditsApply={handleEditsApply}
+            onEditsCancel={handleEditsCancel}
+
+            onFragmentDelete={handleFragmentDelete}
+            onFragmentReplace={handleFragmentReplace}
+
+            onContextMenu={(props.onMessageFragmentReplace && ENABLE_CONTEXT_MENU) ? handleBlocksContextMenu : undefined}
+            onDoubleClick={(props.onMessageFragmentReplace && doubleClickToEdit) ? handleBlocksDoubleClick : undefined}
           />
 
+          {/* Attachment Fragments */}
+          {/*{hasAttachments && (*/}
+          <AttachmentFragments
+            attachmentFragments={attachmentFragments}
+            messageRole={messageRole}
+            contentScaling={contentScaling}
+          />
+          {/*)}*/}
+
+          {/* Reply-To Bubble */}
+          {!!messageMetadata?.inReplyToText && (
+            <ReplyToBubble
+              inlineUserMessage
+              replyToText={messageMetadata.inReplyToText}
+              className='reply-to-bubble'
+            />
+          )}
+
+        </Box>
+
+        {/* Editing: Cancel */}
+        {isEditingText && (
+          <Box sx={personaColumnSx}>
+            <Tooltip arrow disableInteractive title='Discard Edits'>
+              <IconButton onClick={handleEditsCancel}>
+                <CloseRoundedIcon />
+              </IconButton>
+            </Tooltip>
+            {/*<Typography level='body-xs' sx={{ overflowWrap: 'anywhere' }}>*/}
+            {/*  Close*/}
+            {/*</Typography>*/}
+          </Box>
         )}
 
       </Box>
 
-      {/* Reply-To Bubble */}
-      {!!messageMetadata?.inReplyToText && <ReplyToBubble inlineMessage replyToText={messageMetadata.inReplyToText} className='reply-to-bubble' />}
-
 
       {/* Overlay copy icon */}
-      {ENABLE_COPY_MESSAGE_OVERLAY && !fromSystem && !isEditing && (
-        <Tooltip title={messageTyping ? null : (fromAssistant ? 'Copy message' : 'Copy input')} variant='solid'>
+      {ENABLE_COPY_MESSAGE_OVERLAY && !fromSystem && !isEditingText && (
+        <Tooltip title={messagePendingIncomplete ? null : (fromAssistant ? 'Copy message' : 'Copy input')} variant='solid'>
           <IconButton
             variant='outlined' onClick={handleOpsCopy}
             sx={{
@@ -661,7 +604,7 @@ export function ChatMessage(props: {
       )}
 
 
-      {/* Operations Menu (3 dots) */}
+      {/* Message Operations Menu (3 dots) */}
       {!!opsMenuAnchor && (
         <CloseableMenu
           dense placement='bottom-end'
@@ -680,11 +623,10 @@ export function ChatMessage(props: {
           {/* Edit / Copy */}
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             {/* Edit */}
-            {!!props.onMessageEdit && (
-              <MenuItem variant='plain' disabled={messageTyping} onClick={handleOpsEdit} sx={{ flex: 1 }}>
-                <ListItemDecorator><EditRoundedIcon /></ListItemDecorator>
-                {isEditing ? 'Discard' : 'Edit'}
-                {/*{!isEditing && <span style={{ opacity: 0.5, marginLeft: '8px' }}>{doubleClickToEdit ? '(double-click)' : ''}</span>}*/}
+            {!!props.onMessageFragmentReplace && (
+              <MenuItem variant='plain' disabled={!!messagePendingIncomplete} onClick={handleOpsEditToggle} sx={{ flex: 1 }}>
+                <ListItemDecorator>{isEditingText ? <CloseRoundedIcon /> : <EditRoundedIcon />}</ListItemDecorator>
+                {isEditingText ? 'Discard' : 'Edit'}
               </MenuItem>
             )}
             {/* Copy */}
@@ -784,12 +726,12 @@ export function ChatMessage(props: {
       )}
 
 
-      {/* Selection Toolbar */}
-      {ENABLE_SELECTION_TOOLBAR && !!selToolbarAnchor && (
-        <Popper placement='top-start' open anchorEl={selToolbarAnchor} slotProps={{
+      {/* Bubble */}
+      {ENABLE_BUBBLE && !!bubbleAnchor && (
+        <Popper placement='top-start' open anchorEl={bubbleAnchor} slotProps={{
           root: { style: { zIndex: themeZIndexPageBar + 1 } },
         }}>
-          <ClickAwayListener onClickAway={() => closeToolbar()}>
+          <ClickAwayListener onClickAway={() => closeBubble()}>
             <ButtonGroup
               variant='plain'
               sx={{
@@ -848,11 +790,11 @@ export function ChatMessage(props: {
       )}
 
 
-      {/* Selection (Contextual) Menu */}
-      {!!selMenuAnchor && (
+      {/* Context (Right-click) Menu */}
+      {!!contextMenuAnchor && (
         <CloseableMenu
           dense placement='bottom-start'
-          open anchorEl={selMenuAnchor} onClose={closeSelectionMenu}
+          open anchorEl={contextMenuAnchor} onClose={closeContextMenu}
           sx={{ minWidth: 220 }}
         >
           <MenuItem onClick={handleOpsCopy} sx={{ flex: 1, alignItems: 'center' }}>

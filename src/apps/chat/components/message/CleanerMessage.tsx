@@ -4,10 +4,11 @@ import { Box, Button, Checkbox, IconButton, ListItem, Sheet, Typography } from '
 import ClearIcon from '@mui/icons-material/Clear';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
-import { DMessage } from '~/common/state/store-chats';
+import { DMessage, messageFragmentsReduceText } from '~/common/stores/chat/chat.message';
 
 import { TokenBadgeMemo } from '../composer/TokenBadge';
-import { makeAvatar, messageBackground } from './ChatMessage';
+import { isErrorChatMessage } from './explainServiceErrors';
+import { makeMessageAvatar, messageBackground } from './messageUtils';
 
 
 /**
@@ -44,10 +45,9 @@ export function CleanerMessage(props: { message: DMessage, selected: boolean, re
   // derived state
   const {
     id: messageId,
-    text: messageText,
     sender: messageSender,
     avatar: messageAvatar,
-    typing: messageTyping,
+    pendingIncomplete: messagePendingIncomplete,
     role: messageRole,
     purposeId: messagePurposeId,
     originLLM: messageOriginLLM,
@@ -55,15 +55,17 @@ export function CleanerMessage(props: { message: DMessage, selected: boolean, re
     updated: messageUpdated,
   } = props.message;
 
+  const messageText = messageFragmentsReduceText(props.message.fragments);
+
   const fromAssistant = messageRole === 'assistant';
 
-  const isAssistantError = fromAssistant && (messageText.startsWith('[Issue] ') || messageText.startsWith('[OpenAI Issue]'));
+  const isAssistantError = fromAssistant && isErrorChatMessage(messageText);
 
   const backgroundColor = messageBackground(messageRole, !!messageUpdated, isAssistantError);
 
   const avatarEl: React.JSX.Element | null = React.useMemo(() =>
-      makeAvatar(messageAvatar, messageRole, messageOriginLLM, messagePurposeId, messageSender, messageTyping, 'sm'),
-    [messageAvatar, messageOriginLLM, messagePurposeId, messageRole, messageSender, messageTyping],
+      makeMessageAvatar(messageAvatar, messageRole, messageOriginLLM, messagePurposeId, messageSender, !!messagePendingIncomplete),
+    [messageAvatar, messageOriginLLM, messagePendingIncomplete, messagePurposeId, messageRole, messageSender],
   );
 
   const handleCheckedChange = (event: React.ChangeEvent<HTMLInputElement>) =>

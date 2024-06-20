@@ -1,17 +1,14 @@
 import type { DLLMId } from '~/modules/llms/store-llms';
 import type { StreamingClientUpdate } from '~/modules/llms/vendors/unifiedStreamingClient';
 import { autoSuggestions } from '~/modules/aifn/autosuggestions/autoSuggestions';
-import { conversationAutoTitle } from '~/modules/aifn/autotitle/autoTitle';
+import { autoConversationTitle } from '~/modules/aifn/autotitle/autoTitle';
 import { llmStreamingChatGenerate, VChatContextRef, VChatMessageIn, VChatStreamContextName } from '~/modules/llms/llm.client';
 import { speakText } from '~/modules/elevenlabs/elevenlabs.client';
 
-import type { DMessage } from '~/common/state/store-chats';
 import { ConversationsManager } from '~/common/chats/ConversationsManager';
+import { DMessage, messageFragmentsReduceText, messageFragmentsReplaceLastContentText, messageSingleTextOrThrow } from '~/common/stores/chat/chat.message';
 
 import { ChatAutoSpeakType, getChatAutoAI } from '../store-app-chat';
-
-
-export const STREAM_TEXT_INDICATOR = '...';
 
 
 /**
@@ -21,44 +18,58 @@ export async function runAssistantUpdatingState(conversationId: string, history:
   const cHandler = ConversationsManager.getHandler(conversationId);
 
   // ai follow-up operations (fire/forget)
-  const { autoSpeak, autoSuggestDiagrams, autoSuggestQuestions, autoTitleChat } = getChatAutoAI();
+  const { autoSpeak, autoSuggestDiagrams, autoSuggestHTMLUI, autoSuggestQuestions, autoTitleChat } = getChatAutoAI();
 
-  // create a blank and 'typing' message for the assistant
-  const assistantMessageId = cHandler.messageAppendAssistant(STREAM_TEXT_INDICATOR, history[0].purposeId, assistantLlmId, true);
+  // assistant placeholder
+  const { assistantMessageId } = cHandler.messageAppendAssistantPlaceholder(
+    '...',
+    { originLLM: assistantLlmId, purposeId: history[0].purposeId },
+  );
 
   // when an abort controller is set, the UI switches to the "stop" mode
   const abortController = new AbortController();
   cHandler.setAbortController(abortController);
 
-  // stream the assistant's messages
+  // stream the assistant's messages directly to the state store
+  const overwriteMessageParts = (incrementalMessage: Partial<StreamMessageUpdate>, messageComplete: boolean) => {
+    cHandler.messageEdit(assistantMessageId, incrementalMessage, messageComplete, false);
+  };
+  let instructions: VChatMessageIn[];
+  try {
+    instructions = history.map((m): VChatMessageIn => ({ role: m.role, content: messageSingleTextOrThrow(m) /* BIG FIXME */ }));
+  } catch (error) {
+    console.error('runAssistantUpdatingState: error:', error, history);
+    throw error;
+  }
   const messageStatus = await streamAssistantMessage(
     assistantLlmId,
-    history.map((m): VChatMessageIn => ({ role: m.role, content: m.text })),
+    instructions,
     'conversation',
     conversationId,
     parallelViewCount,
     autoSpeak,
-    (update) => cHandler.messageEdit(assistantMessageId, update, false),
+    overwriteMessageParts,
     abortController.signal,
   );
 
   // clear to send, again
-  // FIXME: race condition?
+  // FIXME: race condition? (for sure!)
   cHandler.setAbortController(null);
 
   if (autoTitleChat) {
     // fire/forget, this will only set the title if it's not already set
-    void conversationAutoTitle(conversationId, false);
+    void autoConversationTitle(conversationId, false);
   }
 
-  if (autoSuggestDiagrams || autoSuggestQuestions)
-    autoSuggestions(conversationId, assistantMessageId, autoSuggestDiagrams, autoSuggestQuestions);
+  if (autoSuggestDiagrams || autoSuggestHTMLUI || autoSuggestQuestions)
+    autoSuggestions(conversationId, assistantMessageId, autoSuggestDiagrams, autoSuggestHTMLUI, autoSuggestQuestions);
 
   return messageStatus.outcome === 'success';
 }
 
 type StreamMessageOutcome = 'success' | 'aborted' | 'errored';
 type StreamMessageStatus = { outcome: StreamMessageOutcome, errorMessage?: string };
+type StreamMessageUpdate = Pick<DMessage, 'fragments' | 'originLLM' | 'pendingIncomplete'>;
 
 export async function streamAssistantMessage(
   llmId: DLLMId,
@@ -67,7 +78,7 @@ export async function streamAssistantMessage(
   contextRef: VChatContextRef,
   throttleUnits: number, // 0: disable, 1: default throttle (12Hz), 2+ reduce the message frequency with the square root
   autoSpeak: ChatAutoSpeakType,
-  editMessage: (update: Partial<DMessage>) => void,
+  onMessageUpdated: (incrementalMessage: Partial<StreamMessageUpdate>, messageComplete: boolean) => void,
   abortSignal: AbortSignal,
 ): Promise<StreamMessageStatus> {
 
@@ -85,24 +96,28 @@ export async function streamAssistantMessage(
   if (throttleUnits > 1)
     throttleDelay = Math.round(throttleDelay * Math.sqrt(throttleUnits));
 
-  function throttledEditMessage(updatedMessage: Partial<DMessage>) {
+  function throttledEditMessage(updatedMessage: Partial<StreamMessageUpdate>) {
     const now = Date.now();
     if (throttleUnits === 0 || now - lastCallTime >= throttleDelay) {
-      editMessage(updatedMessage);
+      onMessageUpdated(updatedMessage, false);
       lastCallTime = now;
     }
   }
 
-  const incrementalAnswer: Partial<DMessage> = { text: '' };
+  // TODO: should clean this up once we have multi-fragment streaming/recombination
+  const incrementalAnswer: StreamMessageUpdate = {
+    fragments: [],
+  };
 
   try {
     await llmStreamingChatGenerate(llmId, messagesHistory, contextName, contextRef, null, null, abortSignal, (update: StreamingClientUpdate) => {
       const textSoFar = update.textSoFar;
 
       // grow the incremental message
+      if (textSoFar) incrementalAnswer.fragments = messageFragmentsReplaceLastContentText(incrementalAnswer.fragments, textSoFar);
       if (update.originLLM) incrementalAnswer.originLLM = update.originLLM;
-      if (textSoFar) incrementalAnswer.text = textSoFar;
-      if (update.typing !== undefined) incrementalAnswer.typing = update.typing;
+      if (update.typing !== undefined)
+        incrementalAnswer.pendingIncomplete = update.typing ? true : undefined;
 
       // Update the data store, with optional max-frequency throttling (e.g. OpenAI is downsamped 50 -> 12Hz)
       // This can be toggled from the settings
@@ -125,21 +140,22 @@ export async function streamAssistantMessage(
     if (error?.name !== 'AbortError') {
       console.error('Fetch request error:', error);
       const errorText = ` [Issue: ${error.message || (typeof error === 'string' ? error : 'Chat stopped.')}]`;
-      incrementalAnswer.text = (incrementalAnswer.text || '') + errorText;
+      incrementalAnswer.fragments = messageFragmentsReplaceLastContentText(incrementalAnswer.fragments, errorText, true);
       returnStatus.outcome = 'errored';
       returnStatus.errorMessage = error.message;
     } else
       returnStatus.outcome = 'aborted';
   }
 
-  // Optimized:
-  // 1 - stop the typing animation
-  // 2 - ensure the last content is flushed out
-  editMessage({ ...incrementalAnswer, typing: false });
+  // Ensure the last content is flushed out, and mark as complete
+  onMessageUpdated({ ...incrementalAnswer, pendingIncomplete: undefined }, true);
 
   // 📢 TTS: all
-  if ((autoSpeak === 'all' || autoSpeak === 'firstLine') && incrementalAnswer.text && !spokenLine && !abortSignal.aborted)
-    void speakText(incrementalAnswer.text);
+  if ((autoSpeak === 'all' || autoSpeak === 'firstLine') && !spokenLine && !abortSignal.aborted) {
+    const incrementalText = messageFragmentsReduceText(incrementalAnswer.fragments);
+    if (incrementalText.length > 0)
+      void speakText(incrementalText);
+  }
 
   return returnStatus;
 }

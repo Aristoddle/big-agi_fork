@@ -4,7 +4,7 @@ import { createTRPCRouter, publicProcedure } from '~/server/api/trpc.server';
 import { env } from '~/server/env.mjs';
 import { fetchJsonOrTRPCError } from '~/server/api/trpc.router.fetchers';
 
-import { t2iCreateImagesOutputSchema } from '../t2i.server.types';
+import { getPngDimensions, t2iCreateImagesOutputSchema } from '../t2i.server';
 
 import { HARDCODED_MODELS } from './prodia.models';
 
@@ -85,14 +85,26 @@ export const prodiaRouter = createTRPCRouter({
       if (j.status !== 'succeeded' || !j.imageUrl)
         throw new Error(`Prodia image generation failed within ${elapsed}s`);
 
+      // download the image and convert to base64
+      const imageResponse = await fetch(j.imageUrl);
+      const imageBuffer = await imageResponse.arrayBuffer();
+      const base64Image = Buffer.from(imageBuffer).toString('base64');
+
+      // width and height by looking at the PNG (imageBuffer)
+      const { width, height } = getPngDimensions(imageBuffer);
+
       // respond with 1 result
-      return [
-        {
-          imageUrl: j.imageUrl,
-          altText: jobRequest.prompt,
-          elapsed,
-        },
-      ];
+      const { prompt: altText, ...otherParameters } = jobRequest;
+      return [{
+        mimeType: 'image/png',
+        base64Data: base64Image,
+        altText,
+        width,
+        height,
+        generatorName: 'prodia-' + input.prodiaModel,
+        parameters: otherParameters,
+        generatedAt: new Date().toISOString(),
+      }];
     }),
 
   /** List models - for now just hardcode the list, as there's no endpoint */

@@ -17,13 +17,15 @@ import { useCapabilityTextToImage } from '~/modules/t2i/t2i.client';
 
 import { ConfirmationModal } from '~/common/components/ConfirmationModal';
 import { ConversationsManager } from '~/common/chats/ConversationsManager';
+import { DConversation, DConversationId } from '~/common/stores/chat/chat.conversation';
 import { GlobalShortcutItem, ShortcutKeyName, useGlobalShortcuts } from '~/common/components/useGlobalShortcut';
 import { PanelResizeInset } from '~/common/components/panes/GoodPanelResizeHandler';
 import { PreferencesTab, useOptimaLayout, usePluggableOptimaLayout } from '~/common/layout/optima/useOptimaLayout';
 import { ScrollToBottom } from '~/common/scroll-to-bottom/ScrollToBottom';
 import { ScrollToBottomButton } from '~/common/scroll-to-bottom/ScrollToBottomButton';
 import { addSnackbar, removeSnackbar } from '~/common/components/useSnackbarsStore';
-import { createDMessage, DConversationId, DMessage, DMessageMetadata, getConversation, getConversationSystemPurposeId, useConversation } from '~/common/state/store-chats';
+import { createDMessageFromFragments, createDMessageTextContent, DMessage, DMessageAttachmentFragment, DMessageContentFragment, DMessageMetadata, duplicateDMessageFragments, duplicateDMessageMetadata } from '~/common/stores/chat/chat.message';
+import { getConversation, getConversationSystemPurposeId, useConversation } from '~/common/stores/chat/store-chats';
 import { themeBgAppChatComposer } from '~/common/app.theme';
 import { useFolderStore } from '~/common/state/store-folders';
 import { useIsMobile } from '~/common/components/useMatchMedia';
@@ -31,18 +33,18 @@ import { useRouterQuery } from '~/common/app.routes';
 import { useUIPreferencesStore } from '~/common/state/store-ui';
 import { useUXLabsStore } from '~/common/state/store-ux-labs';
 
-import type { ComposerOutputMultiPart } from './components/composer/composer.types';
-import { ChatBarAltBeam } from './components/ChatBarAltBeam';
-import { ChatBarAltTitle } from './components/ChatBarAltTitle';
-import { ChatBarDropdowns } from './components/ChatBarDropdowns';
+import { ChatBarAltBeam } from './components/layout-bar/ChatBarAltBeam';
+import { ChatBarAltTitle } from './components/layout-bar/ChatBarAltTitle';
+import { ChatBarDropdowns } from './components/layout-bar/ChatBarDropdowns';
 import { ChatBeamWrapper } from './components/ChatBeamWrapper';
-import { ChatDrawerMemo } from './components/ChatDrawer';
+import { ChatDrawerMemo } from './components/layout-drawer/ChatDrawer';
 import { ChatMessageList } from './components/ChatMessageList';
-import { ChatPageMenuItems } from './components/ChatPageMenuItems';
+import { ChatPageMenuItems } from './components/layout-menu/ChatPageMenuItems';
 import { Composer } from './components/composer/Composer';
 import { usePanesManager } from './components/panes/usePanesManager';
 
 import { _handleExecute } from './editors/_handleExecute';
+import { gcChatImageAssets } from './editors/image-generate';
 
 
 // what to say when a chat is new and has no title
@@ -118,19 +120,23 @@ export function AppChat() {
     setFocusedPaneIndex,
   } = usePanesManager();
 
-  const chatHandlers = React.useMemo(() => chatPanes.map(pane => {
-    return pane.conversationId ? ConversationsManager.getHandler(pane.conversationId) : null;
-  }), [chatPanes]);
+  const { paneUniqueConversationIds, paneHandlers, paneBeamStores } = React.useMemo(() => {
+    const paneConversationIds: (DConversationId | null)[] = chatPanes.map(pane => pane.conversationId || null);
+    const paneHandlers = paneConversationIds.map(cId => cId ? ConversationsManager.getHandler(cId) : null);
+    const paneBeamStores = paneHandlers.map(handler => handler?.getBeamStore() ?? null);
+    const paneUniqueConversationIds = Array.from(new Set(paneConversationIds.filter(Boolean))) as DConversationId[];
+    return {
+      paneHandlers: paneHandlers,
+      paneBeamStores: paneBeamStores,
+      paneUniqueConversationIds: paneUniqueConversationIds,
+    };
+  }, [chatPanes]);
 
-  const beamsStores = React.useMemo(() => chatHandlers.map(handler => {
-    return handler?.getBeamStore() ?? null;
-  }), [chatHandlers]);
-
-  const beamsOpens = useAreBeamsOpen(beamsStores);
+  const beamsOpens = useAreBeamsOpen(paneBeamStores);
   const beamOpenStoreInFocusedPane = React.useMemo(() => {
     const open = focusedPaneIndex !== null ? (beamsOpens?.[focusedPaneIndex] ?? false) : false;
-    return open ? beamsStores?.[focusedPaneIndex!] ?? null : null;
-  }, [beamsOpens, beamsStores, focusedPaneIndex]);
+    return open ? paneBeamStores?.[focusedPaneIndex!] ?? null : null;
+  }, [beamsOpens, focusedPaneIndex, paneBeamStores]);
 
   const {
     // focused
@@ -162,7 +168,7 @@ export function AppChat() {
 
   const isMultiPane = chatPanes.length >= 2;
   const isMultiAddable = chatPanes.length < 4;
-  const isMultiConversationId = isMultiPane && new Set(chatPanes.map((pane) => pane.conversationId)).size >= 2;
+  const isMultiConversationId = paneUniqueConversationIds.length >= 2;
   const willMulticast = isComposerMulticast && isMultiConversationId;
   const disableNewButton = isFocusedChatEmpty && !isMultiPane;
 
@@ -210,41 +216,33 @@ export function AppChat() {
     return outcome === true;
   }, [openModelsSetup, openPreferencesTab]);
 
-  const handleComposerAction = React.useCallback((conversationId: DConversationId, chatModeId: ChatModeId, multiPartMessage: ComposerOutputMultiPart, metadata?: DMessageMetadata): boolean => {
-    // validate inputs
-    if (multiPartMessage.length !== 1 || multiPartMessage[0].type !== 'text-block') {
-      addSnackbar({
-        key: 'chat-composer-action-invalid',
-        message: 'Only a single text part is supported for now.',
-        type: 'issue',
-        overrides: {
-          autoHideDuration: 2000,
-        },
-      });
-      return false;
-    }
-    const userText = multiPartMessage[0].text;
+  const handleComposerAction = React.useCallback((conversationId: DConversationId, chatModeId: ChatModeId, fragments: (DMessageContentFragment | DMessageAttachmentFragment)[], metadata?: DMessageMetadata): boolean => {
 
-    // multicast: send the message to all the panes
-    const uniqueConversationIds = new Set([conversationId]);
-    if (willMulticast)
-      chatPanes.forEach(pane => pane.conversationId && uniqueConversationIds.add(pane.conversationId));
+    // [multicast] send the message to all the panes
+    const uniqueConversationIds = willMulticast
+      ? Array.from(new Set([conversationId, ...paneUniqueConversationIds]))
+      : [conversationId];
+
+    // validate conversation existence
+    const uniqueConverations = uniqueConversationIds.map(cId => getConversation(cId)).filter(Boolean) as DConversation[];
+    if (!uniqueConverations.length)
+      return false;
 
     // we loop to handle both the normal and multicast modes
-    let enqueuedAny = false;
-    for (const _cId of uniqueConversationIds) {
-      const history = getConversation(_cId)?.messages;
-      if (!history) continue;
+    for (const conversation of uniqueConverations) {
 
-      const newUserMessage = createDMessage('user', userText);
-      if (metadata) newUserMessage.metadata = metadata;
+      // create the user:message
+      // NOTE: this can lead to multiple chat messages with data refs that are referring to the same dblobs,
+      //       however, we already got transferred ownership of the dblobs at this point.
+      const userMessage = createDMessageFromFragments('user', duplicateDMessageFragments(fragments)); // [chat] create user:message
+      if (metadata) userMessage.metadata = duplicateDMessageMetadata(metadata);
 
       // fire/forget
-      void handleExecuteAndOutcome(chatModeId, _cId, [...history, newUserMessage]);
-      enqueuedAny = true;
+      void handleExecuteAndOutcome(chatModeId /* various */, conversation.id, [...conversation.messages, userMessage]);
     }
-    return enqueuedAny;
-  }, [chatPanes, handleExecuteAndOutcome, willMulticast]);
+
+    return true;
+  }, [paneUniqueConversationIds, handleExecuteAndOutcome, willMulticast]);
 
   const handleConversationExecuteHistory = React.useCallback(async (conversationId: DConversationId, history: DMessage[]) => {
     await handleExecuteAndOutcome('generate-text', conversationId, history);
@@ -280,7 +278,7 @@ export function AppChat() {
     const imaginedPrompt = await imaginePromptFromText(messageText, conversationId) || 'An error sign.';
     await handleExecuteAndOutcome('generate-image', conversationId, [
       ...conversation.messages,
-      createDMessage('user', imaginedPrompt),
+      createDMessageTextContent('user', imaginedPrompt), // [chat] append user:imagine prompt
     ]);
   }, [handleExecuteAndOutcome]);
 
@@ -364,7 +362,7 @@ export function AppChat() {
 
   const handleConfirmedClearConversation = React.useCallback(() => {
     if (clearConversationId) {
-      ConversationsManager.getHandler(clearConversationId).messagesReplace([]);
+      ConversationsManager.getHandler(clearConversationId).replaceMessages([]);
       setClearConversationId(null);
     }
   }, [clearConversationId]);
@@ -382,6 +380,9 @@ export function AppChat() {
     handleOpenConversationInFocusedPane(nextConversationId);
 
     setDeleteConversationIds(null);
+
+    // run GC for dblobs in this conversation
+    void gcChatImageAssets(); // fire/forget
   }, [deleteConversations, handleOpenConversationInFocusedPane]);
 
   const handleConfirmedDeleteConversations = React.useCallback(() => {
@@ -434,7 +435,7 @@ export function AppChat() {
         isMobile={isMobile}
         activeConversationId={focusedPaneConversationId}
         activeFolderId={activeFolderId}
-        chatPanesConversationIds={chatPanes.map(pane => pane.conversationId).filter(Boolean) as DConversationId[]}
+        chatPanesConversationIds={paneUniqueConversationIds}
         disableNewButton={disableNewButton}
         onConversationActivate={handleOpenConversationInFocusedPane}
         onConversationBranch={handleConversationBranch}
@@ -444,7 +445,7 @@ export function AppChat() {
         onConversationsImportDialog={handleConversationImportDialog}
         setActiveFolderId={setActiveFolderId}
       />,
-    [activeFolderId, chatPanes, disableNewButton, focusedPaneConversationId, handleConversationBranch, handleConversationExport, handleConversationImportDialog, handleConversationNewInFocusedPane, handleDeleteConversations, handleOpenConversationInFocusedPane, isMobile],
+    [activeFolderId, disableNewButton, focusedPaneConversationId, handleConversationBranch, handleConversationExport, handleConversationImportDialog, handleConversationNewInFocusedPane, handleDeleteConversations, handleOpenConversationInFocusedPane, isMobile, paneUniqueConversationIds],
   );
 
   const focusedMenuItems = React.useMemo(() =>
@@ -476,8 +477,8 @@ export function AppChat() {
       {chatPanes.map((pane, idx) => {
         const _paneIsFocused = idx === focusedPaneIndex;
         const _paneConversationId = pane.conversationId;
-        const _paneChatHandler = chatHandlers[idx] ?? null;
-        const _paneBeamStore = beamsStores[idx] ?? null;
+        const _paneChatHandler = paneHandlers[idx] ?? null;
+        const _paneBeamStore = paneBeamStores[idx] ?? null;
         const _paneBeamIsOpen = !!beamsOpens?.[idx] && !!_paneBeamStore;
         const _panesCount = chatPanes.length;
         const _keyAndId = `chat-pane-${pane.paneId}`;
@@ -536,6 +537,7 @@ export function AppChat() {
                   capabilityHasT2I={capabilityHasT2I}
                   chatLLMContextTokens={chatLLM?.contextTokens ?? null}
                   fitScreen={isMobile || isMultiPane}
+                  isMobile={isMobile}
                   isMessageSelectionMode={isMessageSelectionMode}
                   setIsMessageSelectionMode={setIsMessageSelectionMode}
                   onConversationBranch={handleConversationBranch}
@@ -583,7 +585,7 @@ export function AppChat() {
       isMobile={isMobile}
       chatLLM={chatLLM}
       composerTextAreaRef={composerTextAreaRef}
-      conversationId={focusedPaneConversationId}
+      targetConversationId={focusedPaneConversationId}
       capabilityHasT2I={capabilityHasT2I}
       isMulticast={!isMultiConversationId ? null : isComposerMulticast}
       isDeveloperMode={isFocusedChatDeveloper}

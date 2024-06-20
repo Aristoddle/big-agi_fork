@@ -11,7 +11,7 @@ import RecordVoiceOverTwoToneIcon from '@mui/icons-material/RecordVoiceOverTwoTo
 
 import { ScrollToBottom } from '~/common/scroll-to-bottom/ScrollToBottom';
 import { ScrollToBottomButton } from '~/common/scroll-to-bottom/ScrollToBottomButton';
-import { useChatLLMDropdown } from '../chat/components/useLLMDropdown';
+import { useChatLLMDropdown } from '../chat/components/layout-bar/useLLMDropdown';
 
 import { EXPERIMENTAL_speakTextStream } from '~/modules/elevenlabs/elevenlabs.client';
 import { SystemPurposeId, SystemPurposes } from '../../data';
@@ -20,9 +20,11 @@ import { useElevenLabsVoiceDropdown } from '~/modules/elevenlabs/useElevenLabsVo
 
 import { Link } from '~/common/components/Link';
 import { SpeechResult, useSpeechRecognition } from '~/common/components/useSpeechRecognition';
-import { conversationTitle, createDMessage, DMessage, useChatStore } from '~/common/state/store-chats';
+import { conversationTitle } from '~/common/stores/chat/chat.conversation';
+import { createDMessageTextContent, DMessage, messageFragmentsReduceText, messageSingleTextOrThrow } from '~/common/stores/chat/chat.message';
 import { launchAppChat, navigateToIndex } from '~/common/app.routes';
 import { playSoundUrl, usePlaySoundUrl } from '~/common/util/audioUtils';
+import { useChatStore } from '~/common/stores/chat/store-chats';
 import { usePluggableOptimaLayout } from '~/common/layout/optima/useOptimaLayout';
 
 import type { AppCallIntent } from './AppCall';
@@ -118,9 +120,9 @@ export function Telephone(props: {
   const onSpeechResultCallback = React.useCallback((result: SpeechResult) => {
     setSpeechInterim(result.done ? null : { ...result });
     if (result.done) {
-      const transcribed = result.transcript.trim();
-      if (transcribed.length >= 1)
-        setCallMessages(messages => [...messages, createDMessage('user', transcribed)]);
+      const userSpeechTranscribed = result.transcript.trim();
+      if (userSpeechTranscribed.length >= 1)
+        setCallMessages(messages => [...messages, createDMessageTextContent('user', userSpeechTranscribed)]); // [state] append user:speech
     }
   }, []);
   const { isSpeechEnabled, isRecording, isRecordingAudio, isRecordingSpeech, startRecording, stopRecording, toggleRecording } = useSpeechRecognition(onSpeechResultCallback, 1000);
@@ -169,7 +171,8 @@ export function Telephone(props: {
     const phoneMessages = personaCallStarters || ['Hello?', 'Hey!'];
     const firstMessage = phoneMessages[Math.floor(Math.random() * phoneMessages.length)];
 
-    setCallMessages([createDMessage('assistant', firstMessage)]);
+    setCallMessages([createDMessageTextContent('assistant', firstMessage)]); // [state] set assistant:hello message
+
     // fire/forget
     void EXPERIMENTAL_speakTextStream(firstMessage, personaVoiceId);
 
@@ -179,22 +182,30 @@ export function Telephone(props: {
   // [E] persona streaming response - upon new user message
   React.useEffect(() => {
     // only act when we have a new user message
-    if (!isConnected || callMessages.length < 1 || callMessages[callMessages.length - 1].role !== 'user')
+    if (!isConnected || callMessages.length < 1)
       return;
-    switch (callMessages[callMessages.length - 1].text) {
+
+    // Voice commands
+    const lastUserMessage = callMessages[callMessages.length - 1];
+    if (lastUserMessage.role !== 'user')
+      return;
+    switch (messageFragmentsReduceText(lastUserMessage.fragments)) {
       // do not respond
       case 'Stop.':
         return;
+
       // command: close the call
       case 'Goodbye.':
         setStage('ended');
         setTimeout(launchAppChat, 2000);
         return;
+
       // command: regenerate answer
       case 'Retry.':
       case 'Try again.':
         setCallMessages(messages => messages.slice(0, messages.length - 2));
         return;
+
       // command: restart chat
       case 'Restart.':
         setCallMessages([]);
@@ -206,7 +217,7 @@ export function Telephone(props: {
 
     // temp fix: when the chat has no messages, only assume a single system message
     const chatMessages: { role: VChatMessageIn['role'], text: string }[] = (reMessages && reMessages.length > 0)
-      ? reMessages
+      ? reMessages.map(message => ({ role: message.role, text: messageSingleTextOrThrow(message) }))
       : personaSystemMessage
         ? [{ role: 'system', text: personaSystemMessage }]
         : [];
@@ -217,7 +228,7 @@ export function Telephone(props: {
       { role: 'system', content: 'You are having a phone call. Your response style is brief and to the point, and according to your personality, defined below.' },
       ...chatMessages.map(message => ({ role: message.role, content: message.text })),
       { role: 'system', content: 'You are now on the phone call related to the chat above. Respect your personality and answer with short, friendly and accurate thoughtful lines.' },
-      ...callMessages.map(message => ({ role: message.role, content: message.text })),
+      ...callMessages.map(message => ({ role: message.role, content: messageSingleTextOrThrow(message) })),
     ];
 
     // perform completion
@@ -237,7 +248,7 @@ export function Telephone(props: {
     }).finally(() => {
       setPersonaTextInterim(null);
       if (finalText || error)
-        setCallMessages(messages => [...messages, createDMessage('assistant', finalText + (error ? ` (ERROR: ${error.message || error.toString()})` : ''))]);
+        setCallMessages(messages => [...messages, createDMessageTextContent('assistant', finalText + (error ? ` (ERROR: ${error.message || error.toString()})` : ''))]); // [state] append assistant:call_response
       // fire/forget
       if (finalText?.length >= 1)
         void EXPERIMENTAL_speakTextStream(finalText, personaVoiceId);
@@ -339,7 +350,7 @@ export function Telephone(props: {
             {callMessages.map((message) =>
               <CallMessage
                 key={message.id}
-                text={message.text}
+                text={messageSingleTextOrThrow(message)}
                 variant={message.role === 'assistant' ? 'solid' : 'soft'}
                 color={message.role === 'assistant' ? 'neutral' : 'primary'}
                 role={message.role}
