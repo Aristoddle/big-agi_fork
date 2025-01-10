@@ -317,6 +317,7 @@ export function prettyShortChatModelName(model: string | undefined): string {
   // TODO: fully reform this function to be using information from the DLLM, rather than this manual mapping
 
   // [OpenAI]
+  if (model.endsWith('-o1')) return 'o1';
   if (model.includes('o1-')) {
     if (model.includes('o1-mini')) return 'o1 Mini';
     if (model.includes('o1-preview')) return 'o1 Preview';
@@ -343,6 +344,14 @@ export function prettyShortChatModelName(model: string | undefined): string {
   // [Anthropic]
   const prettyAnthropic = _prettyAnthropicModelName(model);
   if (prettyAnthropic) return prettyAnthropic;
+  // [Gemini]
+  if (model.includes('gemini-')) {
+    return model.replaceAll('-', ' ')
+      .replace('gemini', 'Gemini')
+      .replace('pro', 'Pro')
+      .replace('flash', 'Flash')
+      .replace('thinking', 'Thinking');
+  }
   // [Deepseek]
   if (model.includes('deepseek-chat')) return 'Deepseek Chat';
   if (model.includes('deepseek-coder')) return 'Deepseek Coder';
@@ -355,7 +364,13 @@ export function prettyShortChatModelName(model: string | undefined): string {
   if (model.includes(':'))
     return model.replace(':latest', '').replaceAll(':', ' ');
   // [xAI]
-  if (model.includes('grok-beta')) return 'Grok Beta';
+  if (model.includes('grok-')) {
+    if (model.includes('grok-3')) return 'Grok 3';
+    if (model.includes('grok-2-vision')) return 'Grok 2 Vision';
+    if (model.includes('grok-2')) return 'Grok 2';
+    if (model.includes('grok-beta')) return 'Grok Beta';
+    if (model.includes('grok-vision-beta')) return 'Grok Vision Beta';
+  }
   return model;
 }
 

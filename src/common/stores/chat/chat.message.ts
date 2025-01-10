@@ -1,6 +1,6 @@
 import { agiUuid } from '~/common/util/idUtils';
 
-import { createPlaceholderVoidFragment, createTextContentFragment, DMessageFragment, duplicateDMessageFragmentsNoVoid, isAttachmentFragment, isContentFragment, isContentOrAttachmentFragment, isVoidFragment } from './chat.fragments';
+import { createPlaceholderVoidFragment, createTextContentFragment, DMessageFragment, duplicateDMessageFragmentsNoVoid, isAttachmentFragment, isContentFragment, isVoidFragment } from './chat.fragments';
 
 import type { ModelVendorId } from '~/modules/llms/vendors/vendors.registry';
 
@@ -235,6 +235,10 @@ export function messageSetUserFlag(message: Pick<DMessage, 'userFlags'>, flag: D
 
 export function messageFragmentsReduceText(fragments: DMessageFragment[], fragmentSeparator: string = '\n\n', excludeAttachmentFragments?: boolean): string {
 
+  // quick path for empty fragments
+  if (!fragments.length)
+    return '';
+
   return fragments
     .map(fragment => {
       switch (true) {
@@ -271,16 +275,4 @@ export function messageFragmentsReduceText(fragments: DMessageFragment[], fragme
     })
     .filter(text => !!text)
     .join(fragmentSeparator);
-}
-
-
-// TODO: remove once the port is fully done - at 2.0.0 ?
-export function messageSingleTextOrThrow(message: DMessage): string {
-  if (message.fragments.length !== 1)
-    throw new Error('Expected single fragment');
-  if (!isContentOrAttachmentFragment(message.fragments[0]))
-    throw new Error('Expected a content or attachment fragment');
-  if (message.fragments[0].part.pt !== 'text')
-    throw new Error('Expected a text part');
-  return message.fragments[0].part.text;
 }

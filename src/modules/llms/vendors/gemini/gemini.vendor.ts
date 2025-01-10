@@ -4,13 +4,13 @@ import { apiAsync } from '~/common/util/trpc.client';
 import type { GeminiAccessSchema } from '../../server/gemini/gemini.router';
 import type { GeminiWire_Safety } from '~/modules/aix/server/dispatch/wiretypes/gemini.wiretypes';
 import type { IModelVendor } from '../IModelVendor';
-import { OpenAILLMOptions } from '../openai/OpenAILLMOptions';
 
 import { GeminiServiceSetup } from './GeminiServiceSetup';
 
 
 interface DGeminiServiceSettings {
   geminiKey: string;
+  geminiHost: string;
   minSafetyLevel: GeminiWire_Safety.HarmBlockThreshold;
 }
 
@@ -25,7 +25,7 @@ interface LLMOptionsGemini {
 }
 
 
-export const ModelVendorGemini: IModelVendor<DGeminiServiceSettings, GeminiAccessSchema, LLMOptionsGemini> = {
+export const ModelVendorGemini: IModelVendor<DGeminiServiceSettings, GeminiAccessSchema> = {
   id: 'googleai',
   name: 'Gemini',
   displayRank: 14,
@@ -36,11 +36,11 @@ export const ModelVendorGemini: IModelVendor<DGeminiServiceSettings, GeminiAcces
   // components
   Icon: GeminiIcon,
   ServiceSetupComponent: GeminiServiceSetup,
-  LLMOptionsComponent: OpenAILLMOptions,
 
   // functions
   initializeSetup: () => ({
     geminiKey: '',
+    geminiHost: '',
     minSafetyLevel: 'HARM_BLOCK_THRESHOLD_UNSPECIFIED',
   }),
   validateSetup: (setup) => {
@@ -49,6 +49,7 @@ export const ModelVendorGemini: IModelVendor<DGeminiServiceSettings, GeminiAcces
   getTransportAccess: (partialSetup): GeminiAccessSchema => ({
     dialect: 'gemini',
     geminiKey: partialSetup?.geminiKey || '',
+    geminiHost: partialSetup?.geminiHost || '',
     minSafetyLevel: partialSetup?.minSafetyLevel || 'HARM_BLOCK_THRESHOLD_UNSPECIFIED',
   }),
 

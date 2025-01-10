@@ -10,7 +10,7 @@ import VisibilityOffOutlinedIcon from '@mui/icons-material/VisibilityOffOutlined
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 
 import type { DModelsServiceId } from '~/common/stores/llms/modelsservice.types';
-import { DLLM, DLLMId, LLM_IF_ANT_PromptCaching, LLM_IF_GEM_CodeExecution, LLM_IF_OAI_Chat, LLM_IF_OAI_Complete, LLM_IF_OAI_Fn, LLM_IF_OAI_Json, LLM_IF_OAI_PromptCaching, LLM_IF_OAI_Realtime, LLM_IF_OAI_Vision, LLM_IF_SPECIAL_OAI_O1Preview } from '~/common/stores/llms/llms.types';
+import { DLLM, DLLMId, LLM_IF_ANT_PromptCaching, LLM_IF_GEM_CodeExecution, LLM_IF_OAI_Chat, LLM_IF_OAI_Complete, LLM_IF_OAI_Fn, LLM_IF_OAI_Json, LLM_IF_OAI_PromptCaching, LLM_IF_OAI_Realtime, LLM_IF_OAI_Reasoning, LLM_IF_OAI_Vision } from '~/common/stores/llms/llms.types';
 import { GoodTooltip } from '~/common/components/GoodTooltip';
 import { findModelsServiceOrNull, llmsStoreActions } from '~/common/stores/llms/store-llms';
 import { useDefaultLLMIDs, useFilteredLLMs } from '~/common/stores/llms/llms.hooks';
@@ -68,13 +68,14 @@ function ModelItem(props: {
   let tooltip = props.serviceLabel;
   if (llm.description)
     tooltip += ' · ' + llm.description;
-  tooltip += ' · ';
   if (llm.contextTokens) {
-    tooltip += llm.contextTokens.toLocaleString() + ' tokens';
+    tooltip += '\n\n' + llm.contextTokens.toLocaleString() + ' tokens';
     if (llm.maxOutputTokens)
       tooltip += ' / ' + llm.maxOutputTokens.toLocaleString() + ' max output tokens';
   } else
-    tooltip += 'token count not provided';
+    tooltip += ' · token count not provided';
+  if (llm.pricing?.chat?._isFree)
+    tooltip += '\n\n🎁 Free model - refresh to check for pricing updates';
 
   const chipsComponentsMemo = React.useMemo(() => {
     if (!SHOW_LLM_INTERFACES)
@@ -85,11 +86,11 @@ function ModelItem(props: {
           return <Chip key={i} size='sm' variant={props.chipChat ? 'solid' : 'plain'} sx={{ boxShadow: 'xs' }}><TextsmsOutlinedIcon /></Chip>;
         case LLM_IF_OAI_Vision:
           return <Chip key={i} size='sm' variant='plain' sx={{ boxShadow: 'xs' }}><VisibilityOutlinedIcon />️</Chip>;
+        case LLM_IF_OAI_Reasoning:
+          return <Chip key={i} size='sm' variant='plain' sx={{ boxShadow: 'xs' }}><PsychologyOutlinedIcon /></Chip>;
         case LLM_IF_ANT_PromptCaching:
         case LLM_IF_OAI_PromptCaching:
           return <Chip key={i} size='sm' variant='plain' sx={{ boxShadow: 'xs' }}><SdCardOutlinedIcon /></Chip>;
-        case LLM_IF_SPECIAL_OAI_O1Preview:
-          return <Chip key={i} size='sm' variant='plain' sx={{ boxShadow: 'xs' }}><PsychologyOutlinedIcon /></Chip>;
         // Ignored
         case LLM_IF_OAI_Json:
         case LLM_IF_OAI_Fn:

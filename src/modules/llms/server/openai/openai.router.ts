@@ -13,10 +13,12 @@ import { fixupHost } from '~/common/util/urlUtils';
 import { OpenAIWire_API_Images_Generations, OpenAIWire_API_Models_List, OpenAIWire_API_Moderations_Create } from '~/modules/aix/server/dispatch/wiretypes/openai.wiretypes';
 
 import { ListModelsResponse_schema, ModelDescriptionSchema } from '../llm.server.types';
-import { azureModelToModelDescription, deepseekModelToModelDescription, groqModelSortFn, groqModelToModelDescription, lmStudioModelToModelDescription, localAIModelToModelDescription, openPipeModelDescriptions, openPipeModelSort, openPipeModelToModelDescriptions, openRouterModelFamilySortFn, openRouterModelToModelDescription, togetherAIModelsToModelDescriptions } from './models/models.data';
+import { azureModelToModelDescription, groqModelSortFn, groqModelToModelDescription, lmStudioModelToModelDescription, localAIModelToModelDescription, openPipeModelDescriptions, openPipeModelSort, openPipeModelToModelDescriptions, openRouterModelFamilySortFn, openRouterModelToModelDescription } from './models/models.data';
+import { deepseekModelFilter, deepseekModelToModelDescription } from './models/deepseek.models';
 import { mistralModelsSort, mistralModelToModelDescription } from './models/mistral.models';
 import { openAIModelFilter, openAIModelToModelDescription, openAISortModels } from './models/openai.models';
 import { perplexityAIModelDescriptions, perplexityAIModelSort } from './models/perplexity.models';
+import { togetherAIModelsToModelDescriptions } from './models/together.models';
 import { wilreLocalAIModelsApplyOutputSchema, wireLocalAIModelsAvailableOutputSchema, wireLocalAIModelsListOutputSchema } from './localai.wiretypes';
 import { xaiModelDescriptions, xaiModelSort } from './models/xai.models';
 
@@ -36,18 +38,18 @@ export const openAIAccessSchema = z.object({
 });
 export type OpenAIAccessSchema = z.infer<typeof openAIAccessSchema>;
 
-export const openAIModelSchema = z.object({
-  id: z.string(),
-  temperature: z.number().min(0).max(2).optional(),
-  maxTokens: z.number().min(1).optional(),
-});
-export type OpenAIModelSchema = z.infer<typeof openAIModelSchema>;
+// export const openAIModelSchema = z.object({
+//   id: z.string(),
+//   temperature: z.number().min(0).max(2).optional(),
+//   maxTokens: z.number().min(1).optional(),
+// });
+// export type OpenAIModelSchema = z.infer<typeof openAIModelSchema>;
 
-export const openAIHistorySchema = z.array(z.object({
-  role: z.enum(['assistant', 'system', 'user'/*, 'function'*/]),
-  content: z.string(),
-}));
-export type OpenAIHistorySchema = z.infer<typeof openAIHistorySchema>;
+// export const openAIHistorySchema = z.array(z.object({
+//   role: z.enum(['assistant', 'system', 'user'/*, 'function'*/]),
+//   content: z.string(),
+// }));
+// export type OpenAIHistorySchema = z.infer<typeof openAIHistorySchema>;
 
 
 // Router Input Schemas
@@ -152,6 +154,7 @@ export const llmOpenAIRouter = createTRPCRouter({
 
         case 'deepseek':
           models = openAIModels
+            .filter(({ id }) => deepseekModelFilter(id))
             .map(({ id }) => deepseekModelToModelDescription(id));
           break;
 
