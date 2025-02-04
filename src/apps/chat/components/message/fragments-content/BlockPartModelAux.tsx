@@ -26,6 +26,7 @@ const _styles = {
   chip: {
     px: 1.5,
     py: 0.375,
+    mt: '1px', // to not crop the outline on mobile
     outline: '1px solid',
     outlineColor: 'success.solidBg', // .outlinedBorder
     boxShadow: `1px 2px 4px -3px var(--joy-palette-success-solidBg)`,
@@ -37,6 +38,7 @@ const _styles = {
   } as const,
 
   chipExpanded: {
+    mt: '1px', // need to copy the `chip` mt
     px: 1.5,
     py: 0.375,
     // borderRadius: 'sm',
@@ -79,6 +81,7 @@ export function BlockPartModelAux(props: {
 }) {
 
   // state
+  const [neverExpanded, setNeverExpanded] = React.useState(true);
   const [expanded, setExpanded] = React.useState(false);
 
   // external state
@@ -95,6 +98,11 @@ export function BlockPartModelAux(props: {
 
   const { onFragmentReplace } = props;
   const showInline = !!onFragmentReplace;
+
+  const handleToggleExpanded = React.useCallback(() => {
+    setNeverExpanded(false);
+    setExpanded(on => !on);
+  }, []);
 
   const handleInline = React.useCallback(() => {
     if (!onFragmentReplace) return;
@@ -125,7 +133,7 @@ export function BlockPartModelAux(props: {
         color='success'
         variant={expanded ? 'solid' : 'soft'}
         size='sm'
-        onClick={() => setExpanded(on => !on)}
+        onClick={handleToggleExpanded}
         sx={expanded ? _styles.chipExpanded : _styles.chip}
         startDecorator={<AllInclusiveIcon sx={_styles.chipIcon}  /* sx={{ color: expanded ? undefined : REASONING_COLOR }} */ />}
         // startDecorator='🧠'
@@ -150,9 +158,11 @@ export function BlockPartModelAux(props: {
     {/* Controlled Box */}
     <ExpanderControlledBox expanded={expanded}>
 
-      <Typography sx={textSx}>
-        {props.auxText}
-      </Typography>
+      {!neverExpanded && (
+        <Typography sx={textSx}>
+          {props.auxText}
+        </Typography>
+      )}
 
     </ExpanderControlledBox>
 

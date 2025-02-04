@@ -74,7 +74,7 @@ import { ButtonMicMemo } from './buttons/ButtonMic';
 import { ButtonMultiChatMemo } from './buttons/ButtonMultiChat';
 import { ButtonOptionsDraw } from './buttons/ButtonOptionsDraw';
 import { ComposerTextAreaActions } from './textarea/ComposerTextAreaActions';
-import { StatusBar } from '../StatusBar';
+import { StatusBarMemo } from '../StatusBar';
 import { TokenBadgeMemo } from './tokens/TokenBadge';
 import { TokenProgressbarMemo } from './tokens/TokenProgressbar';
 import { useComposerDragDrop } from './useComposerDragDrop';
@@ -630,8 +630,12 @@ export function Composer(props: {
     const composerShortcuts: ShortcutObject[] = [];
     if (showChatAttachments) {
       composerShortcuts.push({ key: 'f', ctrl: true, shift: true, action: () => openFileForAttaching(true, handleAttachFiles), description: 'Attach File' });
+      composerShortcuts.push({ key: 'l', ctrl: true, shift: true, action: openWebInputDialog, description: 'Attach Link' });
       if (supportsClipboardRead())
         composerShortcuts.push({ key: 'v', ctrl: true, shift: true, action: attachAppendClipboardItems, description: 'Attach Clipboard' });
+      // Future: keep reactive state here to support Live Screen Capture and more
+      // if (labsAttachScreenCapture && supportsScreenCapture)
+      //   composerShortcuts.push({ key: 's', ctrl: true, shift: true, action: openScreenCaptureDialog, description: 'Attach Screen Capture' });
     }
     if (recognitionState.isActive) {
       composerShortcuts.push({ key: 'm', ctrl: true, action: handleFinishMicAndSend, description: 'Mic · Send', disabled: !recognitionState.hasSpeech || sendStarted, endDecoratorIcon: TelegramIcon as any, level: 4 });
@@ -650,7 +654,7 @@ export function Composer(props: {
         }, description: 'Microphone',
       });
     return composerShortcuts;
-  }, [attachAppendClipboardItems, handleAttachFiles, handleFinishMicAndSend, recognitionState.hasSpeech, recognitionState.isActive, sendStarted, showChatAttachments, toggleRecognition]));
+  }, [attachAppendClipboardItems, handleAttachFiles, handleFinishMicAndSend, openWebInputDialog, recognitionState.hasSpeech, recognitionState.isActive, sendStarted, showChatAttachments, toggleRecognition]));
 
 
   // ...
@@ -723,7 +727,7 @@ export function Composer(props: {
   return (
     <Box aria-label='User Message' component='section' sx={props.sx}>
 
-      {!isMobile && labsShowShortcutBar && <StatusBar toggleMinimized={handleToggleMinimized} isMinimized={isMinimized} />}
+      {!isMobile && labsShowShortcutBar && <StatusBarMemo toggleMinimized={handleToggleMinimized} isMinimized={isMinimized} />}
 
       {/* This container is here just to let the potential statusbar fill the whole space, so we moved the padding here and not in the parent */}
       <Box sx={(!isMinimized || isMobile || !labsShowShortcutBar) ? paddingBoxSx : minimizedSx}>
