@@ -34,9 +34,10 @@ import { getChatLLMId } from '~/common/stores/llms/store-llms';
 import { getConversation, getConversationSystemPurposeId, useConversation } from '~/common/stores/chat/store-chats';
 import { optimaActions, optimaOpenModels, optimaOpenPreferences, useSetOptimaAppMenu } from '~/common/layout/optima/useOptima';
 import { themeBgAppChatComposer } from '~/common/app.theme';
-import { useChatLLM } from '~/common/stores/llms/llms.hooks';
 import { useFolderStore } from '~/common/stores/folders/store-chat-folders';
 import { useIsMobile, useIsTallScreen } from '~/common/components/useMatchMedia';
+import { useLLM } from '~/common/stores/llms/llms.hooks';
+import { useModelDomain } from '~/common/stores/llms/hooks/useModelDomain';
 import { useOverlayComponents } from '~/common/layout/overlays/useOverlayComponents';
 import { useRouterQuery } from '~/common/app.routes';
 import { useUXLabsStore } from '~/common/state/store-ux-labs';
@@ -73,6 +74,16 @@ const scrollToBottomSx = {
 const chatMessageListSx: SxProps = {
   flexGrow: 1,
 };
+
+/*const chatMessageListBrandedSx: SxProps = {
+  flexGrow: 1,
+  backgroundBlendMode: 'soft-light',
+  backgroundColor: themeBgApp,
+  backgroundImage: 'url(https://...)',
+  backgroundPosition: 'center',
+  backgroundRepeat: 'no-repeat',
+  backgroundSize: 'contain',
+} as const;*/
 
 const chatBeamWrapperSx: SxProps = {
   flexGrow: 1,
@@ -119,7 +130,8 @@ export function AppChat() {
 
   const showAltTitleBar = useUXLabsStore(state => DEV_MODE_SETTINGS && state.labsChatBarAlt === 'title');
 
-  const { chatLLM } = useChatLLM();
+  const { domainModelId: chatLLMId } = useModelDomain('primaryChat');
+  const chatLLM = useLLM(chatLLMId) ?? null;
 
   const {
     // state
