@@ -50,7 +50,7 @@ import { ChatBeamWrapper } from './components/ChatBeamWrapper';
 import { ChatDrawerMemo } from './components/layout-drawer/ChatDrawer';
 import { ChatMessageList } from './components/ChatMessageList';
 import { Composer } from './components/composer/Composer';
-import { usePanesManager } from './components/panes/usePanesManager';
+import { usePanesManager } from './components/panes/store-panes-manager';
 
 import type { ChatExecuteMode } from './execute-mode/execute-mode.types';
 
@@ -136,8 +136,8 @@ export function AppChat() {
   const {
     // state
     chatPanes,
+    focusedPaneConversationId, // <-- key
     focusedPaneIndex,
-    focusedPaneConversationId,
     // actions
     navigateHistoryInFocusedPane,
     openConversationInFocusedPane,
