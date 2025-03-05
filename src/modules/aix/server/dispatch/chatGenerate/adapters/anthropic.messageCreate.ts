@@ -57,9 +57,13 @@ export function aixToAnthropicMessageCreate(model: AixAPI_Model, chatGenerate: A
     for (const antPart of _generateAnthropicMessagesContentBlocks(aixMessage)) {
       // apply cache_control to the current head block of the current message
       if ('set_cache_control' in antPart) {
-        if (currentMessage && currentMessage.content.length)
-          AnthropicWire_Blocks.blockSetCacheControl(currentMessage.content[currentMessage.content.length - 1], 'ephemeral');
-        else
+        if (currentMessage && currentMessage.content.length) {
+          const lastBlock = currentMessage.content[currentMessage.content.length - 1];
+          if (lastBlock.type !== 'thinking' && lastBlock.type !== 'redacted_thinking')
+            AnthropicWire_Blocks.blockSetCacheControl(lastBlock, 'ephemeral');
+          else
+            console.warn('Anthropic: cache_control on a thinking block - not allowed');
+        } else
           console.warn('Anthropic: cache_control without a message to attach to');
         continue;
       }
@@ -86,8 +90,7 @@ export function aixToAnthropicMessageCreate(model: AixAPI_Model, chatGenerate: A
 
   // Construct the request payload
   const payload: TRequest = {
-    max_tokens: model.maxTokens !== undefined ? model.maxTokens
-      : (model.id.includes('3-5-sonnet') ? 8192 : 4096), // see `max-tokens-3-5-sonnet-2024-07-15`, and [2024-10-22] max from https://docs.anthropic.com/en/docs/about-claude/models
+    max_tokens: model.maxTokens !== undefined ? model.maxTokens : 8192,
     model: model.id,
     system: systemMessage,
     messages: chatMessages,
@@ -96,7 +99,7 @@ export function aixToAnthropicMessageCreate(model: AixAPI_Model, chatGenerate: A
     // metadata: { user_id: ... }
     // stop_sequences: undefined,
     stream: streaming,
-    ...(model.temperature !== null ? { temperature: model.temperature !== undefined ? model.temperature : undefined, } : {}),
+    ...(model.temperature !== null ? { temperature: model.temperature !== undefined ? model.temperature : undefined } : {}),
     // top_k: undefined,
     // top_p: undefined,
   };
@@ -104,6 +107,17 @@ export function aixToAnthropicMessageCreate(model: AixAPI_Model, chatGenerate: A
   // Top-P instead of temperature
   if (model.topP !== undefined) {
     payload.top_p = model.topP;
+    delete payload.temperature;
+  }
+
+  // [Anthropic] Thinking Budget
+  if (model.vndAntThinkingBudget !== undefined) {
+    payload.thinking = model.vndAntThinkingBudget !== null ? {
+      type: 'enabled',
+      budget_tokens: model.vndAntThinkingBudget < payload.max_tokens ? model.vndAntThinkingBudget : payload.max_tokens - 1,
+    } : {
+      type: 'disabled',
+    };
     delete payload.temperature;
   }
 
@@ -194,9 +208,19 @@ function* _generateAnthropicMessagesContentBlocks({ parts, role }: AixMessages_C
                 toolUseBlock = AnthropicWire_Blocks.ToolUseBlock(part.id, 'execute_code' /* suboptimal */, part.invocation.code);
                 break;
               default:
+                const _exhaustiveCheck: never = part.invocation;
                 throw new Error(`Unsupported tool call type in Model message: ${(part.invocation as any).type}`);
             }
             yield { role: 'assistant', content: toolUseBlock };
+            break;
+
+          case 'ma':
+            if (!part.aText && !part.textSignature && !part.redactedData)
+              throw new Error('Extended Thinking data is missing');
+            if (part.aText && part.textSignature)
+              yield { role: 'assistant', content: AnthropicWire_Blocks.ThinkingBlock(part.aText, part.textSignature) };
+            for (const redactedData of part.redactedData || [])
+              yield { role: 'assistant', content: AnthropicWire_Blocks.RedactedThinkingBlock(redactedData) };
             break;
 
           case 'meta_cache_control':
@@ -204,6 +228,7 @@ function* _generateAnthropicMessagesContentBlocks({ parts, role }: AixMessages_C
             break;
 
           default:
+            const _exhaustiveCheck: never = part;
             throw new Error(`Unsupported part type in Model message: ${(part as any).pt}`);
         }
       }
@@ -229,7 +254,12 @@ function* _generateAnthropicMessagesContentBlocks({ parts, role }: AixMessages_C
             }
             break;
 
+          case 'meta_cache_control':
+            // ignored in tools
+            break;
+
           default:
+            const _exhaustiveCheck: never = part;
             throw new Error(`Unsupported part type in Tool message: ${(part as any).pt}`);
         }
       }

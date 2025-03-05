@@ -1,25 +1,26 @@
 import * as React from 'react';
 
-import { Box, IconButton, ListItemDecorator, MenuItem, Switch, Tooltip, Typography } from '@mui/joy';
+import { Box, IconButton, ListItem, ListItemButton, ListItemDecorator, MenuItem, Option, Select, Switch, Tooltip, Typography } from '@mui/joy';
 import AddIcon from '@mui/icons-material/Add';
 import CheckBoxOutlinedIcon from '@mui/icons-material/CheckBoxOutlined';
 import CleaningServicesOutlinedIcon from '@mui/icons-material/CleaningServicesOutlined';
 import CompressIcon from '@mui/icons-material/Compress';
 import EngineeringIcon from '@mui/icons-material/Engineering';
 import ForkRightIcon from '@mui/icons-material/ForkRight';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SettingsSuggestOutlinedIcon from '@mui/icons-material/SettingsSuggestOutlined';
 
-import { devMode_AixLastDispatchRequest } from '~/modules/aix/client/ContentReassembler';
+import { AixDebuggerDialog } from '~/modules/aix/client/debugger/AixDebuggerDialog';
 
 import type { DConversationId } from '~/common/stores/chat/chat.conversation';
 import { CodiconSplitHorizontal } from '~/common/components/icons/CodiconSplitHorizontal';
 import { CodiconSplitHorizontalRemove } from '~/common/components/icons/CodiconSplitHorizontalRemove';
 import { CodiconSplitVertical } from '~/common/components/icons/CodiconSplitVertical';
 import { CodiconSplitVerticalRemove } from '~/common/components/icons/CodiconSplitVerticalRemove';
+import { FormLabelStart } from '~/common/components/forms/FormLabelStart';
 import { GoodModal } from '~/common/components/modals/GoodModal';
-import { OptimaPanelGroup, OptimaPanelGroupGutter } from '~/common/layout/optima/panel/OptimaPanelGroup';
-import { optimaCloseAppMenu } from '~/common/layout/optima/useOptima';
+import { OptimaPanelGroupedList, OptimaPanelGroupGutter } from '~/common/layout/optima/panel/OptimaPanelGroupedList';
 import { useLabsDevMode } from '~/common/state/store-ux-labs';
 
 import { useChatShowSystemMessages } from '../../store-app-chat';
@@ -56,14 +57,6 @@ export function ChatPane(props: {
   const labsDevMode = useLabsDevMode();
 
 
-  // handlers
-
-  const closeMenu = React.useCallback((event: React.MouseEvent) => {
-    event.stopPropagation();
-    optimaCloseAppMenu();
-  }, []);
-
-
   // Window
 
   const handleIncreaseMultiPane = React.useCallback((event?: React.MouseEvent) => {
@@ -91,22 +84,18 @@ export function ChatPane(props: {
   // Actions
 
   const handleConversationRestart = (event: React.MouseEvent<HTMLDivElement>) => {
-    closeMenu(event);
     props.conversationId && props.onConversationClear(props.conversationId);
   };
 
   const handleConversationBranch = (event: React.MouseEvent<HTMLDivElement>) => {
-    closeMenu(event);
     props.conversationId && props.onConversationBranch(props.conversationId, null, true);
   };
 
   const handleConversationFlatten = (event: React.MouseEvent<HTMLElement>) => {
-    closeMenu(event);
     props.conversationId && props.onConversationFlatten(props.conversationId);
   };
 
   const handleToggleMessageSelectionMode = (event: React.MouseEvent) => {
-    closeMenu(event);
     props.setIsMessageSelectionMode(!props.isMessageSelectionMode);
   };
 
@@ -115,61 +104,20 @@ export function ChatPane(props: {
 
   // [DEV MODE]
 
-  const [devModeDialog, setDevModeDialog] = React.useState<React.ReactNode | null>(null);
+  const [aixLastDispatchDialog, setAixLastDispatchDialog] = React.useState<React.ReactNode | null>(null);
 
   const handleAixShowLastRequest = React.useCallback(() => {
-    setDevModeDialog((
-      <GoodModal
-        open={true}
-        dividers
-        onClose={() => setDevModeDialog(null)}
-        title='Aix: Last Dispach Request Body'
-        sx={{ minWidth: '80vw', maxWidth: undefined, overflow: 'hidden' }}
-      >
-        {devMode_AixLastDispatchRequest ? (
-          <Box sx={{
-            m: 'calc(-1 * var(--Card-padding))',
-            p: 'calc(0.5 * var(--Card-padding))',
-            fontSize: 'sm',
-            display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 2, rowGap: 1,
-            overflow: 'auto',
-          }}>
-            <div>Url</div>
-            <div style={{ whiteSpace: 'break-spaces' }}>{devMode_AixLastDispatchRequest.url}</div>
-            <div>Headers</div>
-            <div style={{ whiteSpace: 'break-spaces' }}>{devMode_AixLastDispatchRequest.headers}</div>
-            <div>Body</div>
-            <div style={{ whiteSpace: 'break-spaces' }}>{devMode_AixLastDispatchRequest.body}</div>
-            {devMode_AixLastDispatchRequest.particles.map(((particleString, idx) => (
-              <React.Fragment key={idx}>
-                <div>Particle {idx + 1}</div>
-                <div style={{ whiteSpace: 'break-spaces' }}>{particleString}</div>
-              </React.Fragment>
-            )))}
-          </Box>
-        ) : 'Contents will be shown after the next request.'}
-      </GoodModal>
-    ));
+    setAixLastDispatchDialog(<AixDebuggerDialog onClose={() => setAixLastDispatchDialog(null)} />);
   }, []);
 
 
   return <>
 
     {/* Window group */}
-    <OptimaPanelGroup title='Window'>
+    <OptimaPanelGroupedList title='Window'>
 
-      <MenuItem onClick={handleToggleMultiPane}>
-        <ListItemDecorator>{props.isVerticalSplit
-          ? (isMultiPane ? <CodiconSplitVerticalRemove /> : <CodiconSplitVertical />)
-          : (isMultiPane ? <CodiconSplitHorizontalRemove /> : <CodiconSplitHorizontal />)
-        }</ListItemDecorator>
-        {/* Unsplit / Split text*/}
-        {props.isVerticalSplit
-          ? (isMultiPane ? 'Unsplit' : 'Split Down')
-          : (isMultiPane ? 'Unsplit' : 'Split Right')
-        }
-        {/* '+' */}
-        {isMultiPane && (
+      <ListItem
+        endAction={!isMultiPane ? undefined : (
           <Tooltip title='Add Another Split'>
             <IconButton
               size='sm'
@@ -182,12 +130,22 @@ export function ChatPane(props: {
             </IconButton>
           </Tooltip>
         )}
-      </MenuItem>
+      >
+        <ListItemButton onClick={handleToggleMultiPane}>
+          <ListItemDecorator>{props.isVerticalSplit
+            ? (isMultiPane ? <CodiconSplitVerticalRemove /> : <CodiconSplitVertical />)
+            : (isMultiPane ? <CodiconSplitHorizontalRemove /> : <CodiconSplitHorizontal />)
+          }</ListItemDecorator>
+          {props.isVerticalSplit
+            ? (isMultiPane ? 'Unsplit' : 'Split Down')
+            : (isMultiPane ? 'Unsplit' : 'Split Right')}
+        </ListItemButton>
+      </ListItem>
 
-    </OptimaPanelGroup>
+    </OptimaPanelGroupedList>
 
     {/* Chat Actions group */}
-    <OptimaPanelGroup title='Actions'>
+    <OptimaPanelGroupedList title='Actions'>
 
       <MenuItem disabled={props.disableItems} onClick={handleConversationBranch}>
         <ListItemDecorator><ForkRightIcon /></ListItemDecorator>
@@ -217,29 +175,31 @@ export function ChatPane(props: {
           {/*{!props.disableItems && <KeyStroke combo='Ctrl + Shift + X' />}*/}
         </Box>
       </MenuItem>
-    </OptimaPanelGroup>
+    </OptimaPanelGroupedList>
 
     {/* ... how do we name this? ... */}
-    <OptimaPanelGroup title='Persona'>
-      <MenuItem onClick={handleToggleSystemMessages}>
+    <OptimaPanelGroupedList title='Persona'>
+      <ListItemButton disabled={props.disableItems} onClick={handleToggleSystemMessages}>
         <ListItemDecorator><SettingsSuggestOutlinedIcon /></ListItemDecorator>
         System Instruction
-        <Switch size='md' checked={showSystemMessages} onChange={handleToggleSystemMessages} sx={{ ml: 'auto' }} />
-      </MenuItem>
-    </OptimaPanelGroup>
+        {/*<FormLabelStart title='View System Instruction' />*/}
+        <Switch size='md' checked={showSystemMessages} disabled={props.disableItems} onChange={handleToggleSystemMessages} sx={{ ml: 'auto' }} />
+        {/*<Checkbox size='md' checked={showSystemMessages} disabled={props.disableItems} sx={{ ml: 'auto' }} />*/}
+      </ListItemButton>
+    </OptimaPanelGroupedList>
 
     {/* [DEV] Development */}
     {labsDevMode && (
-      <OptimaPanelGroup title='[Developers]'>
+      <OptimaPanelGroupedList title='[Developers]'>
         <MenuItem onClick={handleAixShowLastRequest}>
           <ListItemDecorator><EngineeringIcon /></ListItemDecorator>
           AIX: Show Last Request...
         </MenuItem>
-      </OptimaPanelGroup>
+      </OptimaPanelGroupedList>
     )}
 
     {/* [DEV MODE] Show any dialog, if present */}
-    {devModeDialog}
+    {aixLastDispatchDialog}
 
   </>;
 }

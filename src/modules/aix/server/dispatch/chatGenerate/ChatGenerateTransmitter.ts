@@ -130,9 +130,9 @@ export class ChatGenerateTransmitter implements IParticleTransmitter {
     // [security] only emit in development, as it may contain sensitive information
     if (process.env.NODE_ENV !== 'development') return;
     this.transmissionQueue.push({
-      cg: '_debugRequest',
+      cg: '_debugDispatchRequest',
       security: 'dev-env',
-      request: {
+      dispatchRequest: {
         url,
         headers: JSON.stringify(headers, null, 2),
         body: JSON.stringify(body, null, 2),
@@ -197,6 +197,26 @@ export class ChatGenerateTransmitter implements IParticleTransmitter {
       ...(weak ? { weak } : {}),
     };
     // [throttle] send it immediately for now
+    this._queueParticleS();
+  }
+
+  /** Sets a reasoning signature, associated with the current reasoning text */
+  setReasoningSignature(signature: string): void {
+    this.endMessagePart();
+    this.currentPart = {
+      p: 'trs',
+      signature,
+    };
+    this._queueParticleS();
+  }
+
+  /** Adds a raw (redacted) reasoning data parcel */
+  addReasoningRedactedData(data: string): void {
+    this.endMessagePart();
+    this.currentPart = {
+      p: 'trr_',
+      _data: data,
+    };
     this._queueParticleS();
   }
 

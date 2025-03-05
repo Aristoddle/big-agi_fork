@@ -1,9 +1,21 @@
+import { execSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 
-// Build information
-process.env.NEXT_PUBLIC_BUILD_HASH = 'big-agi-2-dev';
+// Build information: from CI, or git commit hash
+let buildHash = process.env.NEXT_PUBLIC_BUILD_HASH || process.env.GITHUB_SHA || process.env.VERCEL_GIT_COMMIT_SHA; // Docker or custom, GitHub Actions, Vercel
+try {
+  // fallback to local git commit hash
+  if (!buildHash)
+    buildHash = execSync('git rev-parse --short HEAD').toString().trim();
+} catch {
+  // final fallback
+  buildHash = '2-dev';
+}
+// The following are used by/available to Release.buildInfo(...)
+process.env.NEXT_PUBLIC_BUILD_HASH = (buildHash || '').slice(0, 10);
 process.env.NEXT_PUBLIC_BUILD_PKGVER = JSON.parse('' + await readFile(new URL('./package.json', import.meta.url))).version;
 process.env.NEXT_PUBLIC_BUILD_TIMESTAMP = new Date().toISOString();
+process.env.NEXT_PUBLIC_DEPLOYMENT_TYPE = process.env.NEXT_PUBLIC_DEPLOYMENT_TYPE || (process.env.VERCEL_ENV ? `vercel-${process.env.VERCEL_ENV}` : 'local'); // Docker or custom, Vercel
 console.log(` 🧠 \x1b[1mbig-AGI\x1b[0m v${process.env.NEXT_PUBLIC_BUILD_PKGVER} (@${process.env.NEXT_PUBLIC_BUILD_HASH})`);
 
 // Non-default build types
@@ -16,7 +28,7 @@ buildType && console.log(` 🧠 big-AGI: building for ${buildType}...\n`);
 
 /** @type {import('next').NextConfig} */
 let nextConfig = {
-  reactStrictMode: true,
+  reactStrictMode: false,
 
   // [exports] https://nextjs.org/docs/advanced-features/static-html-export
   ...buildType && {
@@ -57,6 +69,25 @@ let nextConfig = {
     }
 
     return config;
+  },
+
+  // Optional Analytics > PostHog
+  skipTrailingSlashRedirect: true, // required to support PostHog trailing slash API requests
+  async rewrites() {
+    return [
+      {
+        source: '/a/ph/static/:path*',
+        destination: 'https://us-assets.i.posthog.com/static/:path*',
+      },
+      {
+        source: '/a/ph/:path*',
+        destination: 'https://us.i.posthog.com/:path*',
+      },
+      {
+        source: '/a/ph/decide',
+        destination: 'https://us.i.posthog.com/decide',
+      },
+    ];
   },
 
   // Note: disabled to check whether the project becomes slower with this

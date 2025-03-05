@@ -21,7 +21,8 @@ import { ProviderBootstrapLogic } from '~/common/providers/ProviderBootstrapLogi
 import { ProviderSingleTab } from '~/common/providers/ProviderSingleTab';
 import { ProviderTheming } from '~/common/providers/ProviderTheming';
 import { SnackbarInsert } from '~/common/components/snackbar/SnackbarInsert';
-import { hasGoogleAnalytics, OptionalGoogleAnalytics } from '~/common/components/GoogleAnalytics';
+import { hasGoogleAnalytics, OptionalGoogleAnalytics } from '~/common/components/3rdparty/GoogleAnalytics';
+import { hasPostHogAnalytics, OptionalPostHogAnalytics } from '~/common/components/3rdparty/PostHogAnalytics';
 
 
 const Big_AGI_App = ({ Component, emotionCache, pageProps }: MyAppProps) => {
@@ -54,6 +55,7 @@ const Big_AGI_App = ({ Component, emotionCache, pageProps }: MyAppProps) => {
     {Is.Deployment.VercelFromFrontend && <VercelAnalytics debug={false} />}
     {Is.Deployment.VercelFromFrontend && <VercelSpeedInsights debug={false} sampleRate={1 / 2} />}
     {hasGoogleAnalytics && <OptionalGoogleAnalytics />}
+    {hasPostHogAnalytics && <OptionalPostHogAnalytics />}
 
   </>;
 };

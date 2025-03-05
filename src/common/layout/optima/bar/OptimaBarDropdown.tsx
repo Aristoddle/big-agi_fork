@@ -1,7 +1,7 @@
 import * as React from 'react';
 
 import type { SelectSlotsAndSlotProps } from '@mui/joy/Select/SelectProps';
-import { Box, ListDivider, listItemButtonClasses, ListItemDecorator, Option, optionClasses, Select, selectClasses } from '@mui/joy';
+import { Box, ListDivider, listItemButtonClasses, ListItemDecorator, listItemDecoratorClasses, Option, optionClasses, Select, selectClasses } from '@mui/joy';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 
 
@@ -11,7 +11,7 @@ const useDenseDropdowns = false;
 const useBigIcons = true;
 
 
-const _selectSlotProps: SelectSlotsAndSlotProps<false>['slotProps'] = {
+export const optimaSelectSlotProps: SelectSlotsAndSlotProps<false>['slotProps'] = {
   root: {
     sx: {
       backgroundColor: 'transparent',
@@ -20,17 +20,19 @@ const _selectSlotProps: SelectSlotsAndSlotProps<false>['slotProps'] = {
       // disappear when the 'agi-gone' class is set
       '&.agi-gone': {
         display: 'none',
-      },
-    },
-  },
+      } as const,
+    } as const,
+  } as const,
+
   button: {
     className: 'agi-ellipsize',
     sx: {
       // these + the ellipsize class will ellipsize the text in the button
       display: 'inline-block',
       maxWidth: 300,
-    },
-  },
+    } as const,
+  } as const,
+
   indicator: {
     sx: {
       // additive white 50%
@@ -39,9 +41,10 @@ const _selectSlotProps: SelectSlotsAndSlotProps<false>['slotProps'] = {
       transition: '0.2s',
       [`&.${selectClasses.expanded}`]: {
         transform: 'rotate(-180deg)',
-      },
-    },
-  },
+      } as const,
+    } as const,
+  } as const,
+
   listbox: {
     // Note: we explored disablePortal, which could optimize performance, but it breaks the colors (as they'll look inverted)
     // disablePortal: false,
@@ -66,15 +69,20 @@ const _selectSlotProps: SelectSlotsAndSlotProps<false>['slotProps'] = {
       [`& .${optionClasses.root}`]: {
         maxWidth: 'min(360px, calc(100dvw - 1rem))',
         minWidth: 160,
-      },
+      } as const,
+
+      // Decorator: icon size
+      [`& .${listItemDecoratorClasses.root}`]: {
+        fontSize: 'var(--joy-fontSize-lg)',
+      } as const,
 
       // Button styles
       [`& .${listItemButtonClasses.root}`]: {
         minWidth: 160,
-      },
-    },
-  },
-};
+      } as const,
+    } as const,
+  } as const,
+} as const;
 
 const _styles = {
 
@@ -85,10 +93,6 @@ const _styles = {
   itemsScrollable: {
     overflow: 'auto',
     paddingBlock: 'var(--ListDivider-gap)',
-  } as const,
-
-  symbolDecorator: {
-    fontSize: 'xl',
   } as const,
 
   divider: {
@@ -167,7 +171,7 @@ function OptimaBarDropdown<TValue extends string>(props: {
       listboxOpen={listboxOpen}
       onListboxOpenChange={handleOnOpenChange}
       indicator={<KeyboardArrowDownIcon />}
-      slotProps={_selectSlotProps}
+      slotProps={optimaSelectSlotProps}
       className={props.showGone ? 'agi-gone' : ''}
     >
 
@@ -183,16 +187,8 @@ function OptimaBarDropdown<TValue extends string>(props: {
           const isActive = _itemKey === props.value;
 
           // Label & Decorators
-          let label = _item.title || '';
-          let decorator: React.ReactNode = null;
-          if (props.showSymbols) {
-            if (_item.icon)
-              decorator = <ListItemDecorator>{_item.icon}</ListItemDecorator>;
-            else if (_item.symbol !== undefined)
-              decorator = <ListItemDecorator sx={_styles.symbolDecorator}>{_item.symbol || ''}</ListItemDecorator>;
-            if (_item.symbol)
-              label = `${_item.symbol} ${label}`;
-          }
+          const safeTitle = _item.title || '';
+          const label = (props.showSymbols && _item.symbol) ? `${_item.symbol} ${safeTitle}` : safeTitle;
 
           return _item.type === 'separator' ? (
             <ListDivider key={_itemKey || `sep-${idx}`}>
@@ -204,12 +200,10 @@ function OptimaBarDropdown<TValue extends string>(props: {
           ) : (
             <Option key={_itemKey} value={_itemKey} label={label}>
               {/* Icon / Symbol */}
-              {decorator}
+              {(props.showSymbols && _item.icon || _item.symbol !== undefined) && <ListItemDecorator>{_item.icon || _item.symbol || ''}</ListItemDecorator>}
 
               {/* Text */}
-              <div className='agi-ellipsize'>
-                {_item.title}
-              </div>
+              <div className='agi-ellipsize'>{safeTitle}</div>
 
               {/* Optional End Decorator */}
               {isActive && props.activeEndDecorator}

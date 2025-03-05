@@ -231,7 +231,7 @@ export function useMessageAvatarLabel(
     const modelId = generator.aix?.mId ?? null;
     const vendorId = generator.aix?.vId ?? null;
     const VendorIcon = (vendorId && complexity !== 'minimal') ? findModelVendor(vendorId)?.Icon : null;
-    const metrics = generator.metrics ? _prettyMetrics(generator.metrics) : null;
+    const metrics = generator.metrics ? _prettyMetrics(generator.metrics, complexity) : null;
     const stopReason = generator.tokenStopReason ? _prettyTokenStopReason(generator.tokenStopReason, complexity) : null;
 
     // aix tooltip: more details
@@ -250,10 +250,17 @@ export function useMessageAvatarLabel(
   }, [complexity, created, generator, pendingIncomplete, updated]);
 }
 
-function _prettyMetrics(metrics: DMessageGenerator['metrics']): React.ReactNode {
+function _prettyMetrics(metrics: DMessageGenerator['metrics'], uiComplexityMode: UIComplexityMode): React.ReactNode {
   if (!metrics) return null;
+
+  const showWaitingTime = metrics?.dtStart !== undefined && (uiComplexityMode === 'extra' || metrics.dtStart >= 10000);
+  const showSpeedSection = uiComplexityMode !== 'minimal' && (showWaitingTime || metrics?.vTOutInner !== undefined);
+
   const costCode = metrics.$code ? _prettyCostCode(metrics.$code) : null;
+
   return <Box sx={tooltipMetricsGridSx}>
+
+    {/* Tokens */}
     {metrics?.TIn !== undefined && <div>Tokens:</div>}
     {metrics?.TIn !== undefined && <div>
       {' '}<b>{metrics.TIn?.toLocaleString() || ''}</b> in
@@ -263,6 +270,18 @@ function _prettyMetrics(metrics: DMessageGenerator['metrics']): React.ReactNode 
       {metrics.TOutR !== undefined && <> (<b>{metrics.TOutR?.toLocaleString() || ''}</b> for reasoning)</>}
       {/*{metrics.TOutA !== undefined && <> (<b>{metrics.TOutA?.toLocaleString() || ''}</b> for audio)</>}*/}
     </div>}
+
+    {/* Timings */}
+    {showSpeedSection && <div>Speed:</div>}
+    {showSpeedSection && <div>
+      {!!metrics.vTOutInner && <>~<b>{(Math.round(metrics.vTOutInner * 10) / 10).toLocaleString() || ''}</b> tok/s</>}
+      {showWaitingTime && (<span style={{ opacity: 0.5 }}>
+        {metrics.vTOutInner !== undefined && ' · '}
+        <span>{(Math.round(metrics.dtStart! / 100) / 10).toLocaleString() || ''}</span>s wait
+      </span>)}
+    </div>}
+
+    {/* Costs */}
     {metrics?.$c !== undefined && <div>Costs:</div>}
     {metrics?.$c !== undefined && <div>
       <b>{formatModelsCost(metrics.$c / 100)}</b>
@@ -274,7 +293,7 @@ function _prettyMetrics(metrics: DMessageGenerator['metrics']): React.ReactNode 
         })</small>
       </>}
     </div>}
-    {costCode && <div />}
+    {costCode && metrics?.$c !== undefined ? <div>Costs:</div> : <div />}
     {costCode && <div><em>{costCode}</em></div>}
   </Box>;
 }
@@ -331,6 +350,7 @@ export function prettyShortChatModelName(model: string | undefined): string {
   if (model.includes('gpt-4')) {
     if (model.includes('gpt-4o-mini')) return 'GPT-4o mini';
     if (model.includes('gpt-4o')) return 'GPT-4o';
+    if (model.includes('gpt-4.5')) return 'GPT-4.5';
     if (model.includes('gpt-4-0125-preview')
       || model.includes('gpt-4-1106-preview')
       || model.includes('gpt-4-turbo')
@@ -345,6 +365,16 @@ export function prettyShortChatModelName(model: string | undefined): string {
   }
   // [LocalAI?]
   if (model.endsWith('.bin')) return model.slice(0, -4);
+  // [Alibaba]
+  if (model.startsWith('alibaba-qwen-') || model.startsWith('qwen-')) {
+    return model
+      .replace('alibaba-', ' ')
+      .replace('qwen', 'Qwen')
+      .replace('max', 'Max')
+      .replace('plus', 'Plus')
+      .replace('turbo', 'Turbo')
+      .replaceAll('-', ' ');
+  }
   // [Anthropic]
   const prettyAnthropic = _prettyAnthropicModelName(model);
   if (prettyAnthropic) return prettyAnthropic;
@@ -382,6 +412,12 @@ export function prettyShortChatModelName(model: string | undefined): string {
     if (model.includes('grok-beta')) return 'Grok Beta';
     if (model.includes('grok-vision-beta')) return 'Grok Vision Beta';
   }
+  // [FireworksAI]
+  if (model.includes('accounts/')) {
+    const index = model.indexOf('accounts/');
+    const subStr = model.slice(index + 9);
+    return subStr.replaceAll('/models/', ' · ').replaceAll(/[_-]/g, ' ');
+  }
   return model;
 }
 
@@ -390,8 +426,10 @@ function _prettyAnthropicModelName(modelId: string): string | null {
   if (claudeIndex === -1) return null;
 
   const subStr = modelId.slice(claudeIndex);
-  const is35 = subStr.includes('-3-5-');
-  const version = is35 ? '3.5' : '3';
+  const version =
+    subStr.includes('-3-7-') ? '3.7'
+      : subStr.includes('-3-5-') ? '3.5'
+        : '3';
 
   if (subStr.includes(`-opus`)) return `Claude ${version} Opus`;
   if (subStr.includes(`-sonnet`)) return `Claude ${version} Sonnet`;

@@ -19,7 +19,7 @@ import type { OptimaBarControlMethods } from '~/common/layout/optima/bar/OptimaB
 import { ConfirmationModal } from '~/common/components/modals/ConfirmationModal';
 import { ConversationsManager } from '~/common/chat-overlay/ConversationsManager';
 import { LLM_IF_ANT_PromptCaching, LLM_IF_OAI_Vision } from '~/common/stores/llms/llms.types';
-import { OptimaDrawerIn, OptimaToolbarIn } from '~/common/layout/optima/portals/OptimaPortalsIn';
+import { OptimaDrawerIn, OptimaPanelIn, OptimaToolbarIn } from '~/common/layout/optima/portals/OptimaPortalsIn';
 import { PanelResizeInset } from '~/common/components/panes/GoodPanelResizeHandler';
 import { Release } from '~/common/app.release';
 import { ScrollToBottom } from '~/common/scroll-to-bottom/ScrollToBottom';
@@ -32,7 +32,7 @@ import { createErrorContentFragment, createTextContentFragment, DMessageAttachme
 import { gcChatImageAssets } from '~/common/stores/chat/chat.gc';
 import { getChatLLMId } from '~/common/stores/llms/store-llms';
 import { getConversation, getConversationSystemPurposeId, useConversation } from '~/common/stores/chat/store-chats';
-import { optimaActions, optimaOpenModels, optimaOpenPreferences, useSetOptimaAppMenu } from '~/common/layout/optima/useOptima';
+import { optimaActions, optimaOpenModels, optimaOpenPreferences } from '~/common/layout/optima/useOptima';
 import { themeBgAppChatComposer } from '~/common/app.theme';
 import { useFolderStore } from '~/common/stores/folders/store-chat-folders';
 import { useIsMobile, useIsTallScreen } from '~/common/components/useMatchMedia';
@@ -40,6 +40,7 @@ import { useLLM } from '~/common/stores/llms/llms.hooks';
 import { useModelDomain } from '~/common/stores/llms/hooks/useModelDomain';
 import { useOverlayComponents } from '~/common/layout/overlays/useOverlayComponents';
 import { useRouterQuery } from '~/common/app.routes';
+import { useUIComplexityIsMinimal } from '~/common/state/store-ui';
 import { useUXLabsStore } from '~/common/state/store-ux-labs';
 
 import { ChatPane } from './components/layout-pane/ChatPane';
@@ -50,6 +51,7 @@ import { ChatBeamWrapper } from './components/ChatBeamWrapper';
 import { ChatDrawerMemo } from './components/layout-drawer/ChatDrawer';
 import { ChatMessageList } from './components/ChatMessageList';
 import { Composer } from './components/composer/Composer';
+import { PaneTitleOverlay } from './components/PaneTitleOverlay';
 import { usePanesManager } from './components/panes/store-panes-manager';
 
 import type { ChatExecuteMode } from './execute-mode/execute-mode.types';
@@ -125,6 +127,8 @@ export function AppChat() {
 
   const isMobile = useIsMobile();
   const isTallScreen = useIsTallScreen();
+
+  const isZenMode = useUIComplexityIsMinimal();
 
   const intent = useRouterQuery<Partial<AppChatIntent>>();
 
@@ -473,7 +477,7 @@ export function AppChat() {
     [activeFolderId, disableNewButton, focusedPaneConversationId, handleConversationBranch, handleConversationExport, handleConversationImportDialog, handleConversationNewInFocusedPane, handleDeleteConversations, handleOpenConversationInFocusedPane, isDrawerOpen, paneUniqueConversationIds],
   );
 
-  const focusedMenuItems = React.useMemo(() =>
+  const focusedChatPanelContent = React.useMemo(() => !focusedPaneConversationId ? null :
       <ChatPane
         conversationId={focusedPaneConversationId}
         disableItems={!focusedPaneConversationId || isFocusedChatEmpty}
@@ -488,8 +492,6 @@ export function AppChat() {
       />,
     [focusedPaneConversationId, handleConversationBranch, handleConversationFlatten, handleConversationReset, hasConversations, isFocusedChatEmpty, isMessageSelectionMode, isMobile, isTallScreen],
   );
-
-  useSetOptimaAppMenu(focusedMenuItems, 'AppChat');
 
 
   // Effects
@@ -590,8 +592,11 @@ export function AppChat() {
 
 
   return <>
-    <OptimaDrawerIn>{drawerContent}</OptimaDrawerIn>
+
+    {/* -> Toolbar, -> Drawer, -> Panel*/}
     <OptimaToolbarIn>{focusedBarContent}</OptimaToolbarIn>
+    <OptimaDrawerIn>{drawerContent}</OptimaDrawerIn>
+    <OptimaPanelIn>{focusedChatPanelContent}</OptimaPanelIn>
 
     <PanelGroup
       direction={(isMobile || isTallScreen) ? 'vertical' : 'horizontal'}
@@ -630,14 +635,20 @@ export function AppChat() {
               // for anchoring the scroll button in place
               position: 'relative',
               ...(isMultiPane ? {
+                marginBottom: '1px', // compensates for the -1px in `composerOpenSx` for the Composer offset
                 borderRadius: '0.375rem',
-                border: `2px solid ${_paneIsFocused
+                borderStyle: 'solid',
+                borderColor: _paneIsFocused
                   ? ((willMulticast || !isMultiConversationId) ? theme.palette.primary.solidBg : theme.palette.primary.solidBg)
-                  : ((willMulticast || !isMultiConversationId) ? theme.palette.primary.softActiveBg : theme.palette.background.level1)}`,
+                  : ((willMulticast || !isMultiConversationId) ? theme.palette.primary.softActiveBg : theme.palette.background.level1),
+                borderWidth: '2px',
+                // borderBottomWidth: '3px',
                 // DISABLED on 2024-03-13, it gets in the way quite a lot
                 // filter: (!willMulticast && !_paneIsFocused)
                 //   ? (!isMultiConversationId ? 'grayscale(66.67%)' /* clone of the same */ : 'grayscale(66.67%)')
                 //   : undefined,
+                // 2025-02-27: didn't try, here's another version
+                // filter: _paneIsFocused ? 'none' : 'brightness(0.94) saturate(0.9)',
               } : {
                 // NOTE: this is a workaround for the 'stuck-after-collapse-close' issue. We will collapse the 'other' pane, which
                 // will get it removed (onCollapse), and somehow this pane will be stuck with a pointerEvents: 'none' style, which de-facto
@@ -651,6 +662,13 @@ export function AppChat() {
               })),
             }}
           >
+
+            {isMultiPane && !isZenMode && (
+              <PaneTitleOverlay
+                conversationId={_paneConversationId}
+                isFocused={_paneIsFocused}
+              />
+            )}
 
             <ScrollToBottom
               bootToBottom

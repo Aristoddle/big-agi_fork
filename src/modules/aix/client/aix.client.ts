@@ -31,12 +31,20 @@ export function aixCreateChatGenerateContext(name: AixAPI_Context_ChatGenerate['
 export function aixCreateModelFromLLMOptions(
   llmInterfaces: DLLM['interfaces'],
   llmOptions: DModelParameterValues,
-  llmOptionsOverride: Omit<DModelParameterValues, 'llmRef'> | undefined,
+  _llmOptionsOverride: Omit<DModelParameterValues, 'llmRef'> | undefined,
   debugLlmId: string,
 ): AixAPI_Model {
 
+  // make sure llmRef is removed, if present in the override - excess of caution here
+  const llmOptionsOverride = _llmOptionsOverride ? { ..._llmOptionsOverride } : undefined;
+  if (llmOptionsOverride)
+    delete (llmOptionsOverride as { llmRef?: any }).llmRef;
+
   // destructure input with the overrides
-  const { llmRef, llmTemperature, llmResponseTokens, llmTopP, llmVndGeminiShowThoughts, llmVndOaiReasoningEffort, llmVndOaiRestoreMarkdown } = {
+  const {
+    llmRef, llmTemperature, llmResponseTokens, llmTopP,
+    llmVndAntThinkingBudget, llmVndGeminiShowThoughts, llmVndOaiReasoningEffort, llmVndOaiRestoreMarkdown,
+  } = {
     ...llmOptions,
     ...llmOptionsOverride,
   };
@@ -57,6 +65,7 @@ export function aixCreateModelFromLLMOptions(
     ...(hotfixOmitTemperature ? { temperature: null } : llmTemperature !== undefined ? { temperature: llmTemperature } : {}),
     ...(llmResponseTokens /* null: similar to undefined, will omit the value */ ? { maxTokens: llmResponseTokens } : {}),
     ...(llmTopP !== undefined ? { topP: llmTopP } : {}),
+    ...(llmVndAntThinkingBudget !== undefined ? { vndAntThinkingBudget: llmVndAntThinkingBudget } : {}),
     ...(llmVndGeminiShowThoughts ? { vndGeminiShowThoughts: llmVndGeminiShowThoughts } : {}),
     ...(llmVndOaiReasoningEffort ? { vndOaiReasoningEffort: llmVndOaiReasoningEffort } : {}),
     ...(llmVndOaiRestoreMarkdown ? { vndOaiRestoreMarkdown: llmVndOaiRestoreMarkdown } : {}),
@@ -547,8 +556,15 @@ async function _aixChatGenerateContent_LL(
     fragments: [],
     /* rest start as undefined (missing in reality) */
   };
-  const debugDispatchRequestbody = getLabsDevMode() && aixContext.name === 'conversation'; // [DEV] Debugging the conversation request (only)
-  const contentReassembler = new ContentReassembler(accumulator_LL, debugDispatchRequestbody);
+
+  /**
+   * DEBUG note: early we were filtering (aixContext.name === 'conversation'), but with the new debugger we don't
+   * - 'sudo' mode is enabled by the UX Labs, and activates debug
+   * - every request thereafter both sends back the Aix server-side dispatch packet, and appends all the particles received by the client side
+   */
+  const debugDispatchRequest = getLabsDevMode();
+  const debugContext = !debugDispatchRequest ? undefined : { contextName: aixContext.name, contextRef: aixContext.ref };
+  const contentReassembler = new ContentReassembler(accumulator_LL, debugContext);
 
   // Initialize throttler if throttling is enabled
   const throttler = (onReassemblyUpdate && throttleParallelThreads)
@@ -564,9 +580,9 @@ async function _aixChatGenerateContent_LL(
       chatGenerate: aixChatGenerate,
       context: aixContext,
       streaming: getLabsDevNoStreaming() ? false : aixStreaming, // [DEV] disable streaming if set in the UX (testing)
-      ...(debugDispatchRequestbody && {
+      ...(debugDispatchRequest && {
         connectionOptions: {
-          debugDispatchRequestbody: true, // [DEV] Debugging the request without requiring a server restart
+          debugDispatchRequest: true, // [DEV] Debugging the request without requiring a server restart
         },
       }),
     }, {

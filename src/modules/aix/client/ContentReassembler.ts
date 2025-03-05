@@ -1,7 +1,10 @@
 import { metricsFinishChatGenerateLg, metricsPendChatGenerateLg } from '~/common/stores/metrics/metrics.chatgenerate';
-import { create_CodeExecutionInvocation_ContentFragment, create_CodeExecutionResponse_ContentFragment, create_FunctionCallInvocation_ContentFragment, createErrorContentFragment, createModelAuxVoidFragment, createTextContentFragment, isContentFragment, isModelAuxPart, isTextContentFragment, isVoidFragment, } from '~/common/stores/chat/chat.fragments';
+import { create_CodeExecutionInvocation_ContentFragment, create_CodeExecutionResponse_ContentFragment, create_FunctionCallInvocation_ContentFragment, createErrorContentFragment, createModelAuxVoidFragment, createTextContentFragment, DVoidModelAuxPart, isContentFragment, isModelAuxPart, isTextContentFragment, isVoidFragment } from '~/common/stores/chat/chat.fragments';
 
 import type { AixWire_Particles } from '../server/api/aix.wiretypes';
+
+import type { AixClientDebugger, AixFrameId } from './debugger/memstore-aix-client-debugger';
+import { aixClientDebugger_completeFrame, aixClientDebugger_init, aixClientDebugger_recordParticle, aixClientDebugger_setRequest } from './debugger/reassembler-debug';
 
 import { AixChatGenerateContent_LL, DEBUG_PARTICLES } from './aix.client';
 
@@ -10,24 +13,19 @@ import { AixChatGenerateContent_LL, DEBUG_PARTICLES } from './aix.client';
 const MERGE_ISSUES_INTO_TEXT_PART_IF_OPEN = true;
 
 
-// hackey?: global to be accessed by the UI
-export let devMode_AixLastDispatchRequest: { url: string, headers: string, body: string, particles: string[] } | null = null;
-
-
 /**
  * Reassembles the content fragments and more information from the Aix ChatGenerate Particles.
  */
 export class ContentReassembler {
 
   private currentTextFragmentIndex: number | null = null;
-  private readonly dispatchRequest: typeof devMode_AixLastDispatchRequest = null;
+  private readonly debuggerFrameId: AixFrameId | null = null;
 
-  constructor(readonly accumulator: AixChatGenerateContent_LL, debugDispatchRequest: boolean) {
-    // [DEV] Debugging the request, last-write-wins for the global (displayed in the UI)
-    if (debugDispatchRequest) {
-      this.dispatchRequest = { url: '', headers: '', body: '', particles: [] };
-      devMode_AixLastDispatchRequest = this.dispatchRequest;
-    }
+  constructor(readonly accumulator: AixChatGenerateContent_LL, enableDebugContext?: AixClientDebugger.Context) {
+
+    // [SUDO] Debugging the request, last-write-wins for the global (displayed in the UI)
+    this.debuggerFrameId = !enableDebugContext ? null : aixClientDebugger_init(enableDebugContext);
+
   }
 
   // reset(): void {
@@ -51,6 +49,12 @@ export class ContentReassembler {
           case 'tr_':
             this.onAppendReasoningText(op);
             break;
+          case 'trs':
+            this.onSetReasoningSignature(op);
+            break;
+          case 'trr_':
+            this.onAddRedactedDataParcel(op);
+            break;
           case 'fci':
             this.onStartFunctionCallInvocation(op);
             break;
@@ -64,6 +68,7 @@ export class ContentReassembler {
             this.onAddCodeExecutionResponse(op);
             break;
           default:
+            const _exhaustiveCheck: never = op;
             this._appendReassemblyDevError(`unexpected PartParticleOp: ${JSON.stringify(op)}`);
         }
         break;
@@ -71,9 +76,9 @@ export class ContentReassembler {
       // ChatControlOp
       case 'cg' in op:
         switch (op.cg) {
-          case '_debugRequest':
-            if (this.dispatchRequest)
-              Object.assign(this.dispatchRequest, op.request);
+          case '_debugDispatchRequest':
+            if (this.debuggerFrameId)
+              aixClientDebugger_setRequest(this.debuggerFrameId, op.dispatchRequest);
             break;
           case 'end':
             this.onCGEnd(op);
@@ -88,17 +93,19 @@ export class ContentReassembler {
             this.onModelName(op);
             break;
           default:
+            const _exhaustiveCheck: never = op;
             this._appendReassemblyDevError(`unexpected ChatGenerateOp: ${JSON.stringify(op)}`);
         }
         break;
 
       default:
+        const _exhaustiveCheck: never = op;
         this._appendReassemblyDevError(`unexpected particle: ${JSON.stringify(op)}`);
     }
 
-    // [DEV] Debugging
-    if (this.dispatchRequest && (!('cg' in op) || op.cg !== '_debugRequest'))
-      this.dispatchRequest.particles.push((debugIsAborted ? '!(A)! ' : '') + JSON.stringify(op));
+    // [DEV] Debugging, skipping the header particle
+    if (this.debuggerFrameId && !('cg' in op && op.cg === '_debugDispatchRequest'))
+      aixClientDebugger_recordParticle(this.debuggerFrameId, op, debugIsAborted);
   }
 
   reassembleClientAbort(): void {
@@ -119,6 +126,10 @@ export class ContentReassembler {
     // Perform all the latest operations
     const hasAborted = !!this.accumulator.genTokenStopReason;
     metricsFinishChatGenerateLg(this.accumulator.genMetricsLg, hasAborted);
+
+    // [SUDO] Debugging, finalize the frame
+    if (this.debuggerFrameId)
+      aixClientDebugger_completeFrame(this.debuggerFrameId);
 
   }
 
@@ -142,14 +153,15 @@ export class ContentReassembler {
 
   }
 
-  private onAppendReasoningText({ _t }: Extract<AixWire_Particles.PartParticleOp, { p: 'tr_' }>): void {
+  private onAppendReasoningText({ _t /*, weak*/ }: Extract<AixWire_Particles.PartParticleOp, { p: 'tr_' }>): void {
     // Break text accumulation
     this.currentTextFragmentIndex = null;
 
-    // add to existing ModelAuxVoidFragment if possible
+    // append to existing ModelAuxVoidFragment if possible
     const currentFragment = this.accumulator.fragments[this.accumulator.fragments.length - 1];
     if (currentFragment && isVoidFragment(currentFragment) && isModelAuxPart(currentFragment.part)) {
-      currentFragment.part.aText += _t;
+      const appendedPart = { ...currentFragment.part, aText: (currentFragment.part.aText || '') + _t } satisfies DVoidModelAuxPart;
+      this.accumulator.fragments[this.accumulator.fragments.length - 1] = { ...currentFragment, part: appendedPart };
       return;
     }
 
@@ -157,6 +169,37 @@ export class ContentReassembler {
     const fragment = createModelAuxVoidFragment('reasoning', _t);
     this.accumulator.fragments.push(fragment);
   }
+
+  private onSetReasoningSignature({ signature }: Extract<AixWire_Particles.PartParticleOp, { p: 'trs' }>): void {
+
+    // set to existing ModelAuxVoidFragment if possible
+    const currentFragment = this.accumulator.fragments[this.accumulator.fragments.length - 1];
+    if (currentFragment && isVoidFragment(currentFragment) && isModelAuxPart(currentFragment.part)) {
+      const setPart = { ...currentFragment.part, textSignature: signature } satisfies DVoidModelAuxPart;
+      this.accumulator.fragments[this.accumulator.fragments.length - 1] = { ...currentFragment, part: setPart };
+      return;
+    }
+
+    // if for some reason there's no ModelAuxVoidFragment, create one
+    const fragment = createModelAuxVoidFragment('reasoning', '', signature);
+    this.accumulator.fragments.push(fragment);
+  }
+
+  private onAddRedactedDataParcel({ _data }: Extract<AixWire_Particles.PartParticleOp, { p: 'trr_' }>): void {
+
+    // add to existing ModelAuxVoidFragment if possible
+    const currentFragment = this.accumulator.fragments[this.accumulator.fragments.length - 1];
+    if (currentFragment && isVoidFragment(currentFragment) && isModelAuxPart(currentFragment.part)) {
+      const appendedPart = { ...currentFragment.part, redactedData: [...(currentFragment.part.redactedData || []), _data] } satisfies DVoidModelAuxPart;
+      this.accumulator.fragments[this.accumulator.fragments.length - 1] = { ...currentFragment, part: appendedPart };
+      return;
+    }
+
+    // create a new ModelAuxVoidFragment for redacted thinking
+    const fragment = createModelAuxVoidFragment('reasoning', '', undefined, [_data]);
+    this.accumulator.fragments.push(fragment);
+  }
+
 
   private onStartFunctionCallInvocation(fci: Extract<AixWire_Particles.PartParticleOp, { p: 'fci' }>): void {
     // Break text accumulation
