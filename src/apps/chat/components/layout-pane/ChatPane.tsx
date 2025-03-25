@@ -1,8 +1,7 @@
 import * as React from 'react';
 
-import { Box, IconButton, ListItem, ListItemButton, ListItemDecorator, MenuItem, Switch, Tooltip, Typography } from '@mui/joy';
+import { Box, Checkbox, IconButton, ListItem, ListItemButton, ListItemDecorator, MenuItem, Switch, Tooltip, Typography } from '@mui/joy';
 import AddIcon from '@mui/icons-material/Add';
-import CheckBoxOutlinedIcon from '@mui/icons-material/CheckBoxOutlined';
 import CleaningServicesOutlinedIcon from '@mui/icons-material/CleaningServicesOutlined';
 import CompressIcon from '@mui/icons-material/Compress';
 import EngineeringIcon from '@mui/icons-material/Engineering';
@@ -19,9 +18,8 @@ import { CodiconSplitHorizontalRemove } from '~/common/components/icons/CodiconS
 import { CodiconSplitVertical } from '~/common/components/icons/CodiconSplitVertical';
 import { CodiconSplitVerticalRemove } from '~/common/components/icons/CodiconSplitVerticalRemove';
 import { FormLabelStart } from '~/common/components/forms/FormLabelStart';
-import { GoodModal } from '~/common/components/modals/GoodModal';
 import { OptimaPanelGroupedList, OptimaPanelGroupGutter } from '~/common/layout/optima/panel/OptimaPanelGroupedList';
-import { useLabsDevMode } from '~/common/state/store-ux-labs';
+import { useLabsDevMode } from '~/common/stores/store-ux-labs';
 
 import { useChatShowSystemMessages } from '../../store-app-chat';
 import { panesManagerActions, usePaneDuplicateOrClose } from '../panes/store-panes-manager';
@@ -152,22 +150,6 @@ export function ChatPane(props: {
         Branch
       </MenuItem>
 
-      <MenuItem
-        disabled={props.disableItems}
-        color={props.isMessageSelectionMode ? 'warning' : 'neutral'}
-        variant={props.isMessageSelectionMode ? 'solid' : 'plain'}
-        onClick={handleToggleMessageSelectionMode}
-        sx={props.isMessageSelectionMode ? { fontWeight: 'lg' } : {}}
-      >
-        <ListItemDecorator>{!props.isMessageSelectionMode ? <CleaningServicesOutlinedIcon /> : <CheckBoxOutlinedIcon />}</ListItemDecorator>
-        Cleanup
-      </MenuItem>
-
-      <MenuItem disabled={props.disableItems} onClick={handleConversationFlatten}>
-        <ListItemDecorator><CompressIcon /></ListItemDecorator>
-        Minify
-      </MenuItem>
-
       <MenuItem disabled={props.disableItems} onClick={handleConversationRestart}>
         <ListItemDecorator><RestartAltIcon /></ListItemDecorator>
         <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'space-between', gap: 1 }}>
@@ -175,6 +157,23 @@ export function ChatPane(props: {
           {/*{!props.disableItems && <KeyStroke combo='Ctrl + Shift + X' />}*/}
         </Box>
       </MenuItem>
+
+      <MenuItem disabled={props.disableItems} onClick={handleConversationFlatten}>
+        <ListItemDecorator><CompressIcon /></ListItemDecorator>
+        Minify
+      </MenuItem>
+
+      <MenuItem
+        disabled={props.disableItems}
+        color={props.isMessageSelectionMode ? 'warning' : 'neutral'}
+        variant={props.isMessageSelectionMode ? 'solid' : 'plain'}
+        onClick={handleToggleMessageSelectionMode}
+        sx={props.isMessageSelectionMode ? { fontWeight: 'lg' } : {}}
+      >
+        <ListItemDecorator>{!props.isMessageSelectionMode ? <CleaningServicesOutlinedIcon /> : <Checkbox size='md' color='warning' variant='plain' checked />}</ListItemDecorator>
+        Cleanup
+      </MenuItem>
+
     </OptimaPanelGroupedList>
 
     {/* ... how do we name this? ... */}
