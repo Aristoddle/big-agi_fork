@@ -19,6 +19,7 @@ interface OptimaState {
   panelIsOpen: boolean;
 
   // modals
+  showAIXDebugger: boolean;
   showKeyboardShortcuts: boolean;
   showLogger: boolean;
   showModelOptions: DLLMId | false;
@@ -41,6 +42,15 @@ function initialDrawerOpen() {
   return bootNavItem ? !bootNavItem.hideDrawer : false;
 }
 
+const modalsClosedState = {
+  showAIXDebugger: false,
+  showKeyboardShortcuts: false,
+  showLogger: false,
+  showModelOptions: false,
+  showModels: false,
+  showPreferences: false,
+} as const;
+
 const initialState: OptimaState = {
 
   // modes
@@ -51,17 +61,13 @@ const initialState: OptimaState = {
   panelIsOpen: false,
 
   // modals that can overlay anything
-  showKeyboardShortcuts: false,
-  showLogger: false,
-  showModelOptions: false,
-  showModels: false,
-  showPreferences: false,
+  ...modalsClosedState,
   preferencesTab: 'chat',
 
   // timings
   lastDrawerOpenTime: 0,
   lastPanelOpenTime: 0,
-};
+} as const;
 
 export interface OptimaActions {
 
@@ -74,6 +80,9 @@ export interface OptimaActions {
   closePanel: () => void;
   openPanel: () => void;
   togglePanel: () => void;
+
+  closeAIXDebugger: () => void;
+  openAIXDebugger: () => void;
 
   closeKeyboardShortcuts: () => void;
   openKeyboardShortcuts: () => void;
@@ -116,11 +125,14 @@ export const useLayoutOptimaStore = create<OptimaState & OptimaActions>((_set, _
   openPanel: () => _set({ panelIsOpen: true, lastPanelOpenTime: Date.now() }),
   togglePanel: () => _get().panelIsOpen ? _get().closePanel() : _get().openPanel(),
 
+  closeAIXDebugger: () => _set({ showAIXDebugger: false }),
+  openAIXDebugger: () => _set({ ...modalsClosedState, showAIXDebugger: true }),
+
   closeKeyboardShortcuts: () => _set({ showKeyboardShortcuts: false }),
   openKeyboardShortcuts: () => _set({ showKeyboardShortcuts: true }),
 
   closeLogger: () => _set({ showLogger: false }),
-  openLogger: () => _set({ showLogger: true }),
+  openLogger: () => _set({ ...modalsClosedState, showLogger: true }),
 
   closeModelOptions: () => _set({ showModelOptions: false }),
   openModelOptions: (id: DLLMId) => _set({ showModelOptions: id }),
