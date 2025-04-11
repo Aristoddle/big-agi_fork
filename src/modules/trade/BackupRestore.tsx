@@ -3,16 +3,18 @@
 import * as React from 'react';
 import { fileOpen, fileSave, FileWithHandle } from 'browser-fs-access';
 
-import { Box, Button, Divider, Sheet, Typography } from '@mui/joy';
+import { Box, Button, Divider, FormControl, FormLabel, Sheet, Switch, Typography } from '@mui/joy';
 import DownloadIcon from '@mui/icons-material/Download';
 import DoneIcon from '@mui/icons-material/Done';
 import ErrorIcon from '@mui/icons-material/Error';
 import RestoreIcon from '@mui/icons-material/Restore';
+import WarningRoundedIcon from '@mui/icons-material/WarningRounded';
 
 import { GoodModal } from '~/common/components/modals/GoodModal';
 import { Is } from '~/common/util/pwaUtils';
 import { Release } from '~/common/app.release';
 import { createModuleLogger } from '~/common/logger';
+import { downloadBlob } from '~/common/util/downloadUtils';
 
 
 // configuration
@@ -32,6 +34,7 @@ const INCLUDED_IDB_KEYS: { [dbName: string]: { [storeName: string]: string[]; };
 
 
 // Flashing Backup Schema
+// NOTE: ABSOLUTELY NOT CHANGE WITHOUT CHANGING THE saveFlashObjectOrThrow_Streaming TOO (!)
 interface DFlashSchema {
   _t: 'agi.flash-backup';
   _v: number;
@@ -433,7 +436,21 @@ function isValidBackup(data: any): data is DFlashSchema {
 /**
  * Creates a backup object and optionally saves it to a file
  */
-async function saveFlashObjectOrThrow(backupType: 'full' | 'auto-before-restore', ignoreExclusions: boolean, saveToFileName: string) {
+async function saveFlashObjectOrThrow(backupType: 'full' | 'auto-before-restore', forceDownloadOverFileSave: boolean, ignoreExclusions: boolean, saveToFileName: string) {
+
+  // for mobile, try with the download link approach - we keep getting truncated JSON save-files in other paths, streaming or not
+  if (forceDownloadOverFileSave || !Is.Desktop)
+    return createFlashObject(backupType, ignoreExclusions)
+      .then(JSON.stringify)
+      .then((flashString) => {
+        logger.info(`Expected flash file size: ${flashString.length.toLocaleString()} bytes`);
+        downloadBlob(new Blob([flashString], { type: 'application/json' }), saveToFileName);
+        return undefined;
+      });
+
+  // for mobile, try a different implementation, with streaming creation, to hopefully avoid truncation
+  // if (forceStreaming || !Is.Desktop)
+  //   return saveFlashObjectOrThrow_Streaming(backupType, ignoreExclusions, saveToFileName);
 
   // run after the file picker has confirmed a file
   const flashBlobPromise = new Promise<Blob>(async (resolve) => {
@@ -449,12 +466,96 @@ async function saveFlashObjectOrThrow(backupType: 'full' | 'auto-before-restore'
     resolve(new Blob([flashString], { type: 'application/json' }));
   });
 
-  await fileSave(flashBlobPromise, {
+  return await fileSave(flashBlobPromise, {
+    description: BACKUP_FILE_FORMAT,
+    extensions: ['.agi.json', '.json'],
     fileName: saveToFileName,
-    extensions: ['.json'],
-    description: 'Big-AGI V2 Flash File',
   });
 }
+
+// async function saveFlashObjectOrThrow_Streaming(backupType: 'full' | 'auto-before-restore', ignoreExclusions: boolean, saveToFileName: string) {
+//
+//   // on mobile, stringify without spaces
+//   const spacesForMobile = Is.Desktop ? 2 : undefined;
+//
+//   // create JSON in chunks without ever holding the entire string in memory
+//   const encoder = new TextEncoder();
+//
+//   // create a streaming response - this is the key to avoiding truncation
+//   const response = new Response(
+//     new ReadableStream({
+//       async start(controller) {
+//         try {
+//           // start the JSON object
+//           controller.enqueue(encoder.encode('{\n'));
+//           controller.enqueue(encoder.encode(`  "_t": "agi.flash-backup",\n`));
+//           controller.enqueue(encoder.encode(`  "_v": ${BACKUP_FORMAT_VERSION_NUMBER},\n`));
+//           controller.enqueue(encoder.encode(`  "metadata": ${JSON.stringify({
+//             version: BACKUP_FORMAT_VERSION,
+//             timestamp: new Date().toISOString(),
+//             application: 'Big-AGI',
+//             backupType,
+//           }, null, spacesForMobile).replace(/^/gm, '  ')},\n`));
+//
+//           // stream storage section
+//           controller.enqueue(encoder.encode('  "storage": {\n'));
+//
+//           // add localStorage (usually smaller)
+//           const localStorage = await getAllLocalStorageKeyValues();
+//           controller.enqueue(encoder.encode('    "localStorage": '));
+//           controller.enqueue(encoder.encode(JSON.stringify(localStorage, null, spacesForMobile).replace(/^/gm, '    ')));
+//           controller.enqueue(encoder.encode(',\n'));
+//
+//           // add indexedDB with manual chunking for large objects
+//           controller.enqueue(encoder.encode('    "indexedDB": {\n'));
+//
+//           const indexedDB = await getAllIndexedDBData(ignoreExclusions);
+//           const dbNames = Object.keys(indexedDB);
+//           for (let i = 0; i < dbNames.length; i++) {
+//             const dbName = dbNames[i];
+//             const isLast = i === dbNames.length - 1;
+//
+//             controller.enqueue(encoder.encode(`      "${dbName}": `));
+//
+//             // clean nulls and control characters
+//             const sanitized = JSON.stringify(indexedDB[dbName], (_key, value) => {
+//               if (typeof value === 'string')
+//                 return value.replace(/\u0000/g, '');
+//               return value;
+//             }, spacesForMobile).replace(/^/gm, '      ');
+//
+//             controller.enqueue(encoder.encode(sanitized));
+//             controller.enqueue(encoder.encode(isLast ? '\n' : ',\n'));
+//           }
+//
+//           // close all objects
+//           controller.enqueue(encoder.encode('    }\n'));
+//           controller.enqueue(encoder.encode('  }\n'));
+//           controller.enqueue(encoder.encode('}\n'));
+//
+//           controller.close();
+//         } catch (error) {
+//           console.error('Error creating stream:', error);
+//           controller.error(error);
+//         }
+//       },
+//     }),
+//     {
+//       headers: {
+//         'Content-Type': 'application/json',
+//         'Content-Disposition': `attachment; filename="${saveToFileName}"`,
+//       },
+//     },
+//   );
+//
+//   // the fileSave implementation will use the body.pipeTo(writable) code path
+//   // which is perfect for large files as it streams directly to disk
+//   await fileSave(response, {
+//     description: BACKUP_FILE_FORMAT,
+//     extensions: ['.agi.json', '.json'],
+//     fileName: saveToFileName,
+//   });
+// }
 
 async function createFlashObject(backupType: 'full' | 'auto-before-restore', ignoreExclusions: boolean): Promise<DFlashSchema> {
   return {
@@ -501,7 +602,7 @@ export function FlashRestore(props: { unlockRestore?: boolean }) {
     let file: FileWithHandle;
     try {
       file = await fileOpen({
-        extensions: ['.json'],
+        extensions: ['.agi.json', '.json'],
         description: BACKUP_FILE_FORMAT,
         mimeTypes: ['application/json'],
       });
@@ -546,17 +647,23 @@ export function FlashRestore(props: { unlockRestore?: boolean }) {
     setErrorMessage(null);
     try {
       // 1. Auto-backup current state (best effort)
-      try {
-        const dateStr = new Date().toISOString().split('.')[0].replace('T', '-');
-        await saveFlashObjectOrThrow('auto-before-restore', false, `Big-AGI-auto-pre-flash-${dateStr}.agi.json`);
-        logger.info('Created auto-backup before restore');
-      } catch (error: any) {
-        if (error?.name === 'AbortError')
-          logger.warn('Auto-backup before restore dismissed by the user');
-        else
-          logger.warn('Auto-backup before restore failed:', error);
-        // non-fatal, proceed with restore
-      }
+      // NOTE: disabled: more confusing/harmful than useful
+      // try {
+      //   const dateStr = new Date().toISOString().split('.')[0].replace('T', '-');
+      //   await saveFlashObjectOrThrow(
+      //     'auto-before-restore',
+      //     true, // auto-backup with streaming
+      //     false, // auto-backup without images
+      //     `Big-AGI-auto-pre-flash-${dateStr}.json`,
+      //   );
+      //   logger.info('Created auto-backup before restore');
+      // } catch (error: any) {
+      //   if (error?.name === 'AbortError')
+      //     logger.warn('Auto-backup before restore dismissed by the user');
+      //   else
+      //     logger.warn('Auto-backup before restore failed:', error);
+      //   // non-fatal, proceed with restore
+      // }
 
       // 2. Restore data (localStorage first, then IndexedDB)
       await restoreLocalStorage(backupDataForRestore.storage.localStorage);
@@ -635,9 +742,9 @@ export function FlashRestore(props: { unlockRestore?: boolean }) {
         This will <Typography fontWeight='lg' color='danger'>replace all current application data</Typography> with the content from the selected flash file.&nbsp;
         <Typography fontWeight='lg' color='danger'>WARNING: This is a destructive operation that may break the app.</Typography>
       </Typography>
-      <Typography fontWeight='md'>
-        An automatic backup of your current data will be attempted before proceeding.
-      </Typography>
+      {/*<Typography fontWeight='md'>*/}
+      {/*  An automatic backup of your current data will be attempted before proceeding.*/}
+      {/*</Typography>*/}
       {backupDataForRestore?.metadata && (
         <Box sx={{ mt: 1, p: 1.5, bgcolor: 'background.level1', borderRadius: 'sm', border: '1px solid', borderColor: 'neutral.outlinedBorder', fontSize: 'sm' }}>
           <Box fontWeight='md' mb={1}>Flash File Details:</Box>
@@ -669,6 +776,7 @@ export function FlashBackup(props: {
 }) {
 
   // state
+  const [includeImages, setIncludeImages] = React.useState(false);
   const [backupState, setBackupState] = React.useState<'idle' | 'processing' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
 
@@ -684,8 +792,13 @@ export function FlashBackup(props: {
     try {
       onStartedBackup?.();
       const dateStr = new Date().toISOString().split('.')[0].replace('T', '-');
-      await saveFlashObjectOrThrow('full', event.shiftKey, `Big-AGI-flash${event.shiftKey ? '+images' : ''}-${dateStr}.agi.json`);
-      setBackupState('success');
+      const success = await saveFlashObjectOrThrow(
+        'full',
+        event.ctrlKey, // control forces a traditional browser download - default: fileSave
+        includeImages,
+        `Big-AGI-flash${includeImages ? '+images' : ''}${event.ctrlKey ? '-download' : ''}-${dateStr}.json`,
+      );
+      setBackupState(success ? 'success' : 'idle');
     } catch (error: any) {
       if (error?.name === 'AbortError') {
         // the user has closed the file picker, most likely - do nothing
@@ -696,12 +809,12 @@ export function FlashBackup(props: {
         setErrorMessage(`Backup failed: ${_getErrorText(error)}`);
       }
     }
-  }, [onStartedBackup]);
+  }, [includeImages, onStartedBackup]);
 
 
   return <>
 
-    <Typography level='body-sm' mt={{ xs: 3, md: 5 }}>
+    <Typography level='body-sm' mt={3}>
       Save <strong>all settings and chats</strong>:
     </Typography>
     <Button
@@ -712,6 +825,7 @@ export function FlashBackup(props: {
       loading={isProcessing}
       endDecorator={backupState === 'success' ? <DoneIcon /> : backupState === 'error' ? <ErrorIcon /> : <DownloadIcon />}
       onClick={handleFullBackup}
+      onDoubleClick={console.log}
       sx={{
         boxShadow: 'md',
         backgroundColor: 'background.popup',
@@ -720,14 +834,15 @@ export function FlashBackup(props: {
     >
       {backupState === 'success' ? 'Backup Saved' : backupState === 'error' ? 'Backup Failed' : isProcessing ? 'Backing Up...' : 'Export All'}
     </Button>
-    {!errorMessage && <Typography level='body-xs'>
-      <Box component='span' sx={{ display: { xs: 'none', md: 'block' } }}>
-        Shift + Click to include images
-      </Box>
-      <Box component='span' sx={{ display: { xs: 'block', md: 'none' } }}>
-        Excludes image binary data
-      </Box>
-    </Typography>}
+    {!errorMessage && <>
+      <FormControl orientation='horizontal' sx={{ justifyContent: 'space-between', alignItems: 'center', ml: 2, mr: 1.25, mt: 0.25 }}>
+        <FormLabel sx={{ fontWeight: 'md' }}>Include Binary Images</FormLabel>
+        <Switch size='sm' color={includeImages ? 'danger' : undefined} checked={includeImages} onChange={(event) => setIncludeImages(event.target.checked)} />
+      </FormControl>
+      {includeImages && <Typography level='body-xs' color='danger' ml={2} endDecorator={<WarningRoundedIcon />}>
+        Files too large may get corrupted.
+      </Typography>}
+    </>}
 
     {errorMessage && (
       <Sheet variant='soft' color='danger' sx={{ px: 1.5, py: 1, borderRadius: 'sm', display: 'grid', gap: 1 }}>
