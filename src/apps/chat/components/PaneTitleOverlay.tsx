@@ -48,6 +48,9 @@ const _styles = {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+    cursor: 'pointer',
+    minWidth: '2.75rem',
+    textAlign: 'center',
   } as const,
   toolButton: {
     '--IconButton-size': '1.5rem',
@@ -157,15 +160,19 @@ export function PaneTitleOverlay(props: {
             mx: { md: 1 },
           }}
         />
-      ) : hasTitle ? (
-        <Box sx={_styles.title} onDoubleClick={handleTitleEditBegin}>
+      ) : !!props.conversationId && <>
+        {hasTitle && <Box sx={_styles.title} onClick={handleTitleEditBegin}>
           {title}
-        </Box>
-      ) : !!props.conversationId && (
-        <IconButton title='Edit Chat Title' size='sm' color={color} variant={variantP} onClick={handleTitleEditBegin} sx={_styles.toolButton}>
-          <EditRoundedIcon sx={_styles.toolIcon} />
-        </IconButton>
-      )}
+        </Box>}
+        {!hasTitle && <Box fontStyle='italic' onClick={handleTitleEditBegin}>
+          untitled
+        </Box>}
+        {!hasTitle && <TooltipOutlined title='Edit Chat Title'>
+          <IconButton title='' size='sm' color={color} variant={variantP} onClick={handleTitleEditBegin} sx={_styles.toolButton}>
+            <EditRoundedIcon sx={_styles.toolIcon} />
+          </IconButton>
+        </TooltipOutlined>}
+      </>}
 
       {/* Delete This */}
       {ENABLE_DELETE && hasTitle && !!props.conversationId && (

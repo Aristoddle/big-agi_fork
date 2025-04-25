@@ -87,6 +87,7 @@ export function useChatDrawerRenderItems(
   filterHasStars: boolean,
   filterHasImageAssets: boolean,
   filterHasDocFragments: boolean,
+  filterIsArchived: boolean,
   grouping: ChatNavGrouping,
   searchSorting: ChatSearchSorting,
   showRelativeSize: boolean,
@@ -109,7 +110,11 @@ export function useChatDrawerRenderItems(
 
   const stabilizeRenderItems = React.useRef<ChatDrawerRenderItems>(undefined);
 
-  return useChatStore(({ conversations }) => {
+  return useChatStore(({ conversations: convPreFilter }) => {
+
+      // filter 0: archival status
+      const conversations = filterIsArchived ? convPreFilter.filter(c => !!c.isArchived)
+        : convPreFilter.filter(c => !c.isArchived);
 
       // filter 1: select all conversations or just the ones in the active folder
       const conversationsInFolder = !activeFolder ? conversations
@@ -168,6 +173,7 @@ export function useChatDrawerRenderItems(
             isIncognito: !!_c._isIncognito,
             isEmpty: !messageCount && !_c.userTitle,
             title,
+            isArchived: !!_c.isArchived,
             userSymbol: _c.userSymbol || undefined,
             userFlagsSummary: userFlagsUnique,
             containsDocAttachments: hasDocs && filterHasDocFragments, // special case: only show this icon when filtering - too many icons otherwise
@@ -282,15 +288,21 @@ export function useChatDrawerRenderItems(
             : filterHasDocFragments ? 'No attachment results'
               : filterHasImageAssets ? 'No image results'
                 : filterHasStars ? 'No starred results'
-                  : isSearching ? 'Text not found'
-                    : 'No conversations in folder',
+                  : filterIsArchived ? 'No archived conversations'
+                    : isSearching ? 'Text not found'
+                      : 'No conversations in folder',
         });
       } else {
         // filtering reminder (will be rendered with a clear button too)
-        if (filterHasStars || filterHasImageAssets || filterHasDocFragments) {
+        if (filterHasStars || filterHasImageAssets || filterHasDocFragments || filterIsArchived) {
           renderNavItems.unshift({
             type: 'nav-item-info-message',
-            message: `Filtering by ${filterHasStars ? 'stars' : ''}${filterHasStars && filterHasImageAssets ? ', ' : ''}${filterHasImageAssets ? 'images' : ''}${(filterHasStars || filterHasImageAssets) && filterHasDocFragments ? ', ' : ''}${filterHasDocFragments ? 'attachments' : ''}`,
+            message: `${filterIsArchived ? 'Showing' : 'Filtering by'} ${[
+              filterHasStars && 'stars',
+              filterHasImageAssets && 'images',
+              filterHasDocFragments && 'attachments',
+              filterIsArchived && 'archived',
+            ].filter(Boolean).join(', ')}`,
           });
         }
       }

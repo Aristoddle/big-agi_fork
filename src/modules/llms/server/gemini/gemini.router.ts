@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { env } from '~/server/env.mjs';
+import { env } from '~/server/env';
 
 import packageJson from '../../../../../package.json';
 
@@ -11,7 +11,7 @@ import { GeminiWire_API_Models_List, GeminiWire_Safety } from '~/modules/aix/ser
 import { fixupHost } from '~/common/util/urlUtils';
 
 import { ListModelsResponse_schema } from '../llm.server.types';
-import { geminiDevCheckForSuperfluousModels_DEV, geminiFilterModels, geminiModelToModelDescription, geminiSortModels } from './gemini.models';
+import { geminiDevCheckForSuperfluousModels_DEV, geminiFilterModels, geminiModelsAddVariants, geminiModelToModelDescription, geminiSortModels } from './gemini.models';
 
 
 // Default hosts
@@ -113,7 +113,7 @@ export const llmGeminiRouter = createTRPCRouter({
         .sort(geminiSortModels);
 
       return {
-        models: models,
+        models: geminiModelsAddVariants(models),
       };
     }),
 
